@@ -97,6 +97,8 @@ Linux:
 
 On Windows, register the manifest path under the current-user Chrome or Edge `NativeMessagingHosts\\com.secretariat.browser` registry key. The host manifest's `allowed_origins` entry and Secretariat's device config should name the same extension origin.
 
+If the popup says the native host is not installed for the browser, verify that `com.secretariat.browser.json` exists in that browser's native messaging host location and points to an executable absolute host path. If it says the host does not authorize the extension, compare the unpacked extension ID with both the manifest's `allowed_origins` entry and the Secretariat device config. Reload the unpacked extension after changing its source files.
+
 ## Authorize a credential for a site
 
 The browser bridge never guesses from provider names. Set the login URL explicitly in the private Garden:
@@ -108,6 +110,8 @@ secretariat garden set-login \
 ```
 
 Only the URL origin is used for matching, so that credential can fill HTTPS pages on `example.com` while remaining unavailable on unrelated origins.
+
+For generated browser proofs only, the `login` link may use HTTP when the host is exactly `localhost`, `127.0.0.1`, or `::1`. This makes it possible to exercise the real browser extension on a controlled loopback page without installing a development certificate. The exception applies only to the login link; `manage`, `revoke`, and `docs` links remain HTTPS-only. Never authorize a real credential for an HTTP loopback page.
 
 Add the account identifier separately:
 
@@ -135,6 +139,19 @@ Protocol version 1 currently supports:
 
 Requests have strict action-specific fields and bounded request IDs. The native host also checks the browser-supplied extension caller origin against device configuration before reading Garden data.
 
+## Real generated-data browser evidence
+
+The bridge has been exercised on macOS 26.6.2 with Chrome 151 and Edge 152 using temporary Gardens, generated credentials, and user-level native-host registrations. The checks covered:
+
+- successful explicit fill on an authorized loopback origin in both browsers;
+- rejection of the same page on a different loopback port;
+- refusal when two visible password fields were ambiguous, followed by exact fill after one field was focused;
+- bounded missing-host diagnostics and recovery after restoring each browser's host manifest;
+- full browser restart and native-host reconnection; and
+- a delayed-lookup navigation race in which the authorized page moved to another origin before injection and received no credential.
+
+No built-in browser password store, Apple credential store, real Garden, or real credential was used in these proofs.
+
 ## Current limitations
 
 - Username selection is deliberately conservative: the extension fills one visible field in the password's form, preferring `autocomplete="username"` and then one email field. It leaves ambiguous username fields untouched rather than guessing.
@@ -143,4 +160,4 @@ Requests have strict action-specific fields and bounded request IDs. The native 
 - Save/update propagation from the extension is still disabled.
 - Chrome and Edge built-in password stores remain outside this provider path; reconciliation/import handles those existing copies.
 
-These limitations keep the first browser bridge narrow while the account metadata and save/update semantics are developed separately.
+These limitations keep the first browser bridge narrow while the save/update semantics and additional backend unlock paths are developed separately.
