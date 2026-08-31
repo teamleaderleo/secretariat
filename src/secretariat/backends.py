@@ -2,10 +2,20 @@
 
 from __future__ import annotations
 
+import getpass
+import hashlib
+import hmac
+import importlib.util
+import os
 import shutil
 import subprocess
+import tempfile
+import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 
+from .config import DeviceConfig, DeviceConfigError, default_config_path, load_device_config
 from .garden import Copy
 
 
@@ -18,6 +28,7 @@ class Tooling:
     secret_tool: str | None
     wl_copy: str | None
     macos_security: str | None
+    pykeepass_available: bool = False
 
     @classmethod
     def detect(cls) -> "Tooling":
@@ -25,6 +36,7 @@ class Tooling:
             shutil.which("secret-tool"),
             shutil.which("wl-copy"),
             shutil.which("security"),
+            importlib.util.find_spec("pykeepass") is not None,
         )
 
 
@@ -80,9 +92,124 @@ class SecretServiceBackend:
         return value
 
 
-def backend_for(source: Copy, tooling: Tooling) -> SecretServiceBackend:
+class KDBXBackend:
+    """Exact-UUID KDBX access through the optional PyKeePass dependency."""
+
+    def __init__(self, path: Path, password_provider: Callable[[], str] | None) -> None:
+        self._path = path.expanduser()
+        if password_provider is None:
+            raise BackendError("KDBX unlock provider is unavailable")
+        self._password_provider = password_provider
+
+    def load(self, source: Copy) -> str:
+        database, _baseline = self._open()
+        entry = self._entry(database, source)
+        value = entry.password
+        if not isinstance(value, str) or not value:
+            raise BackendError("credential is absent from the KDBX entry")
+        return value
+
+    def store(self, source: Copy, value: str, label: str) -> None:
+        del label
+        database, baseline = self._open()
+        entry = self._entry(database, source)
+        current = entry.password or ""
+        if hmac.compare_digest(current, value):
+            return
+
+        entry.save_history()
+        entry.password = value
+        entry.touch(modify=True)
+
+        if _encrypted_fingerprint(self._path) != baseline:
+            raise BackendError("KDBX home diverged before save; review the competing revision")
+
+        temporary = _temporary_path(self._path)
+        try:
+            try:
+                database.save(str(temporary))
+                os.chmod(temporary, 0o600)
+                _fsync_file(temporary)
+            except Exception as error:
+                raise BackendError("KDBX database could not be saved") from error
+
+            if _encrypted_fingerprint(self._path) != baseline:
+                raise BackendError("KDBX home diverged during save; review the competing revision")
+            try:
+                os.replace(temporary, self._path)
+                _fsync_directory(self._path.parent)
+            except OSError as error:
+                raise BackendError("KDBX database could not be replaced atomically") from error
+        finally:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+    def _open(self):
+        if self._path.is_symlink():
+            raise BackendError("KDBX path must not be a symbolic link")
+        if not self._path.is_file():
+            raise BackendError("KDBX database is unavailable at the configured path")
+
+        try:
+            from pykeepass import PyKeePass
+        except ImportError as error:
+            raise BackendError("KDBX support requires the optional secretariat[kdbx] dependency") from error
+
+        baseline = _encrypted_fingerprint(self._path)
+        password = self._password_provider()
+        if not isinstance(password, str) or not password:
+            raise BackendError("KDBX unlock was cancelled or empty")
+        try:
+            database = PyKeePass(str(self._path), password=password)
+        except Exception as error:
+            raise BackendError("KDBX database could not be opened with the supplied unlock credential") from error
+        return database, baseline
+
+    @staticmethod
+    def _entry(database, source: Copy):
+        if len(source.reference) != 32 or any(
+            character not in "0123456789abcdef" for character in source.reference
+        ):
+            raise BackendError("KDBX copy reference must be a canonical lowercase 32-hex entry UUID")
+        try:
+            entry_uuid = uuid.UUID(hex=source.reference)
+        except ValueError as error:
+            raise BackendError("KDBX copy reference must be a canonical lowercase 32-hex entry UUID") from error
+        try:
+            matches = database.find_entries(uuid=entry_uuid, first=False)
+        except Exception as error:
+            raise BackendError("KDBX entry lookup failed") from error
+        if len(matches) == 0:
+            raise BackendError("KDBX entry UUID was not found")
+        if len(matches) != 1:
+            raise BackendError("KDBX entry UUID resolved to multiple entries")
+        return matches[0]
+
+
+def backend_for(
+    source: Copy,
+    tooling: Tooling,
+    *,
+    device_config: DeviceConfig | None = None,
+    password_provider: Callable[[], str] | None = None,
+):
     if source.type == "secret_service":
         return SecretServiceBackend(tooling.secret_tool)
+    if source.type == "kdbx":
+        if not tooling.pykeepass_available:
+            raise BackendError("KDBX support requires the optional secretariat[kdbx] dependency")
+        if device_config is None:
+            try:
+                device_config = load_device_config(default_config_path())
+            except DeviceConfigError as error:
+                raise BackendError(str(error)) from error
+        if device_config.kdbx_path is None:
+            raise BackendError("KDBX home path is not configured on this device")
+        if password_provider is None:
+            password_provider = lambda: getpass.getpass("KDBX master password: ")
+        return KDBXBackend(device_config.kdbx_path, password_provider)
     raise BackendError(f"{source.type} is indexed only; value access is unavailable")
 
 
@@ -100,3 +227,55 @@ def copy_paste_once(value: str, tooling: Tooling) -> None:
     )
     if result.returncode != 0:
         raise BackendError("credential could not be placed on the paste-once clipboard")
+
+
+def _encrypted_fingerprint(path: Path) -> tuple[int, int, bytes]:
+    try:
+        before = path.stat()
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        after = path.stat()
+    except OSError as error:
+        raise BackendError("KDBX database could not be inspected") from error
+    if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+        raise BackendError("KDBX database changed while being inspected")
+    return after.st_size, after.st_mtime_ns, digest.digest()
+
+
+def _temporary_path(path: Path) -> Path:
+    try:
+        descriptor, raw_path = tempfile.mkstemp(
+            prefix=f".{path.name}.secretariat-",
+            suffix=".tmp",
+            dir=path.parent,
+        )
+        os.close(descriptor)
+        os.chmod(raw_path, 0o600)
+    except OSError as error:
+        raise BackendError("KDBX temporary file could not be created") from error
+    return Path(raw_path)
+
+
+def _fsync_file(path: Path) -> None:
+    try:
+        with path.open("rb") as handle:
+            os.fsync(handle.fileno())
+    except OSError as error:
+        raise BackendError("KDBX temporary file could not be flushed") from error
+
+
+def _fsync_directory(path: Path) -> None:
+    if not hasattr(os, "O_DIRECTORY"):
+        return
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+    except OSError:
+        return
+    try:
+        os.fsync(descriptor)
+    except OSError:
+        pass
+    finally:
+        os.close(descriptor)
