@@ -13,6 +13,7 @@ from secretariat.garden import load_garden
 
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE = ROOT / "garden.example.json"
+EXTENSION_ID = "abcdefghijklmnopabcdefghijklmnop"
 
 
 class AppDispatchTests(unittest.TestCase):
@@ -22,6 +23,27 @@ class AppDispatchTests(unittest.TestCase):
             code = app.main(["--garden", str(EXAMPLE), "find", "chrome"])
         self.assertEqual(code, 0)
         self.assertIn("example-browser-login", output.getvalue())
+
+    def test_browser_manifest_dispatches_without_a_garden(self):
+        output = io.StringIO()
+        with redirect_stdout(output):
+            code = app.main(
+                [
+                    "browser",
+                    "manifest",
+                    "--extension-id",
+                    EXTENSION_ID,
+                    "--host-path",
+                    "/usr/local/bin/secretariat-native-host",
+                ]
+            )
+        self.assertEqual(code, 0)
+        document = json.loads(output.getvalue())
+        self.assertEqual(document["name"], "com.secretariat.browser")
+        self.assertEqual(
+            document["allowed_origins"],
+            [f"chrome-extension://{EXTENSION_ID}/"],
+        )
 
     def test_garden_add_and_attach_use_private_garden_path(self):
         with tempfile.TemporaryDirectory() as directory:
