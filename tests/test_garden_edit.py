@@ -83,9 +83,21 @@ class GardenEditTests(unittest.TestCase):
     def test_invalid_login_url_never_replaces_garden(self):
         self.add_portable()
         before = self.path.read_bytes()
-        with self.assertRaisesRegex(GardenEditError, "HTTPS"):
+        with self.assertRaisesRegex(GardenEditError, "HTTP loopback"):
             set_login(self.path, alias="example-login", url="http://example.invalid/login")
         self.assertEqual(self.path.read_bytes(), before)
+
+    def test_loopback_login_url_supports_generated_browser_proofs(self):
+        self.add_portable()
+        set_login(
+            self.path,
+            alias="example-login",
+            url="http://127.0.0.1:8765/login",
+        )
+        self.assertEqual(
+            load_garden(self.path).by_alias("example-login").links["login"],
+            "http://127.0.0.1:8765/login",
+        )
 
     def test_invalid_username_never_replaces_garden(self):
         self.add_portable()

@@ -63,6 +63,36 @@ class GardenTests(unittest.TestCase):
         with self.assertRaisesRegex(GardenError, "does not name"):
             parse_garden(document)
 
+    def test_generated_browser_proofs_allow_http_only_for_login_on_exact_loopback(self):
+        for url in (
+            "http://localhost:8765/login",
+            "http://127.0.0.1:8765/login",
+            "http://[::1]:8765/login",
+        ):
+            with self.subTest(url=url):
+                document = self.document()
+                document["entries"][1]["links"]["login"] = url
+                self.assertEqual(
+                    parse_garden(document).by_alias("example-browser-login").links["login"],
+                    url,
+                )
+
+        for url in (
+            "http://example.invalid/login",
+            "http://localhost.example.invalid/login",
+            "http://127.0.0.2:8765/login",
+        ):
+            with self.subTest(url=url):
+                document = self.document()
+                document["entries"][1]["links"]["login"] = url
+                with self.assertRaisesRegex(GardenError, "HTTP loopback"):
+                    parse_garden(document)
+
+        document = self.document()
+        document["entries"][1]["links"]["manage"] = "http://127.0.0.1:8765/manage"
+        with self.assertRaisesRegex(GardenError, "HTTPS"):
+            parse_garden(document)
+
     def test_duplicate_copy_ids_fail(self):
         document = self.document()
         document["entries"][1]["copies"][1]["id"] = "apple"

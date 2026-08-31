@@ -19,10 +19,14 @@ class BrowserExtensionFileTests(unittest.TestCase):
 
     def test_service_worker_uses_native_host_without_extension_storage(self):
         script = (EXTENSION / "service_worker.js").read_text(encoding="utf-8")
-        self.assertIn('sendNativeMessage(HOST_NAME', script)
+        request = (EXTENSION / "native_request.mjs").read_text(encoding="utf-8")
+        self.assertIn("sendNativeRequest(chrome.runtime, HOST_NAME, request)", script)
+        self.assertIn("runtime.sendNativeMessage(hostName, request", request)
         self.assertIn("chrome.tabs.get(tab.id)", script)
         self.assertNotIn("chrome.storage", script)
+        self.assertNotIn("chrome.storage", request)
         self.assertNotIn("localStorage", script)
+        self.assertNotIn("localStorage", request)
 
     def test_popup_inserts_metadata_as_text(self):
         script = (EXTENSION / "popup.js").read_text(encoding="utf-8")
