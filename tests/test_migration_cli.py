@@ -33,9 +33,9 @@ class MigrationCLITests(unittest.TestCase):
             ):
                 code = migration_cli.main(
                     [
-                        "migrate",
                         "--garden",
                         str(root / "garden.json"),
+                        "migrate",
                         "to-kdbx",
                         "example-login",
                         "--snapshot",
