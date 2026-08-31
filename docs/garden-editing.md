@@ -12,6 +12,7 @@ After `secretariat home add` returns a KDBX UUID, create the logical credential:
 secretariat garden add \
   --alias github-personal \
   --title "GitHub personal" \
+  --username generated-user@example.invalid \
   --kind password \
   --provider github \
   --copy-id portable \
@@ -19,7 +20,7 @@ secretariat garden add \
   --reference 00112233445566778899aabbccddeeff
 ```
 
-The first copy becomes the explicit home.
+The first copy becomes the explicit home. `--username` is optional, secret-free account metadata. Existing Garden entries without it remain valid.
 
 ## Set the login URL
 
@@ -32,6 +33,18 @@ secretariat garden set-login \
 ```
 
 The browser bridge compares the page origin with this login URL before it will offer or retrieve the credential. It does not infer authorization from the provider name or source reference.
+
+## Set the account username
+
+Set or replace the username independently of credential values:
+
+```text
+secretariat garden set-username \
+  --alias github-personal \
+  --username generated-user@example.invalid
+```
+
+The username may be an email address, account name, or other single-line login identifier. It lets browser and platform providers distinguish multiple accounts at one origin. It is private metadata, not a password, and is never inferred from an opaque copy reference.
 
 ## Attach another copy
 

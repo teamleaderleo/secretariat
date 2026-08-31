@@ -1,4 +1,4 @@
-import { fillPasswordField } from "./password_fill.mjs";
+import { fillLoginFields } from "./password_fill.mjs";
 
 const HOST_NAME = "com.secretariat.browser";
 const PROTOCOL_VERSION = 1;
@@ -32,6 +32,7 @@ async function handleMessage(message) {
       credentials: response.credentials.map((item) => ({
         alias: String(item.alias || ""),
         title: String(item.title || ""),
+        username: typeof item.username === "string" ? item.username : null,
         provider: String(item.provider || ""),
         home_type: String(item.home_type || ""),
         fillable: item.fillable === true,
@@ -49,6 +50,18 @@ async function handleMessage(message) {
     if (!response.ok || typeof response.password !== "string" || response.password.length === 0) {
       return { ok: false, error: nativeError(response) };
     }
+    const username = response.username == null ? null : response.username;
+    if (
+      username !== null
+      && (
+        typeof username !== "string"
+        || username.length === 0
+        || username.length > 512
+        || /[\u0000-\u001f\u007f]/.test(username)
+      )
+    ) {
+      return { ok: false, error: "native host returned invalid account metadata" };
+    }
 
     const currentTab = await chrome.tabs.get(tab.id);
     if (typeof currentTab.url !== "string" || canonicalOrigin(currentTab.url) !== origin) {
@@ -58,8 +71,8 @@ async function handleMessage(message) {
     const password = response.password;
     const results = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
-      func: fillPasswordField,
-      args: [password]
+      func: fillLoginFields,
+      args: [username, password]
     });
     const result = results && results[0] ? results[0].result : null;
     return result && result.ok

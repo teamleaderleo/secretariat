@@ -17,7 +17,7 @@ The public repository contains software, generated examples, tests, and document
 - optional exact-UUID KDBX home read/write through PyKeePass, with entry history and encrypted-file divergence checks;
 - explicit KDBX home creation and UUID-backed entry enrollment;
 - atomic secret-free Garden metadata editing;
-- a generated-data Chrome/Edge Manifest V3 + native-messaging bridge for exact-origin password fill;
+- a generated-data Chrome/Edge Manifest V3 + native-messaging bridge for exact-origin username/password fill;
 - repository scanning for several common secret formats;
 - indexed copy types for Apple Passwords, Chrome, Edge, macOS Keychain, SSH agent, KDBX, and external providers.
 
@@ -71,6 +71,7 @@ A Garden is secret-free private metadata. A logical credential can have several 
 {
   "alias": "example-login",
   "title": "Example login",
+  "username": "generated-user@example.invalid",
   "kind": "password",
   "provider": "example",
   "copies": [

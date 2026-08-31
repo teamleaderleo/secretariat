@@ -32,7 +32,7 @@ function credentialButton(credential) {
   const title = document.createElement("strong");
   title.textContent = credential.title || credential.alias || "Credential";
   const detail = document.createElement("span");
-  const parts = [credential.provider, credential.home_type].filter(Boolean);
+  const parts = [credential.username, credential.provider, credential.home_type].filter(Boolean);
   if (credential.fillable !== true) {
     parts.push(unavailableLabel(credential.unavailable_reason));
     button.disabled = true;
@@ -50,7 +50,7 @@ function credentialButton(credential) {
           button.disabled = false;
           return;
         }
-        showMessage("Password filled.");
+        showMessage(response.username_filled ? "Username and password filled." : "Password filled.");
         window.close();
       } catch {
         showMessage("Password field was not filled.");

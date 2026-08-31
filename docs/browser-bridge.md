@@ -8,8 +8,9 @@ The extension can:
 
 - inspect the active HTTP/HTTPS tab after the user opens the Secretariat popup;
 - ask the native host which Garden password entries explicitly authorize that page origin through `links.login`;
-- show the matching aliases without sending credential values to the popup;
-- after an explicit click, request one password and inject it into the focused password field, or the only visible password field on the page.
+- show matching titles and optional Garden usernames without sending credential values to the popup;
+- distinguish multiple accounts authorized for the same origin; and
+- after an explicit click, request one password, fill an unambiguous username field when account metadata exists, and inject the password into the focused password field or the only visible password field on the page.
 
 The first value backend available to the browser host is GNOME Secret Service. KDBX entries are visible as unavailable until a reviewed background unlock mechanism exists. The browser host never tries to open an interactive KDBX password prompt.
 
@@ -108,6 +109,14 @@ secretariat garden set-login \
 
 Only the URL origin is used for matching, so that credential can fill HTTPS pages on `example.com` while remaining unavailable on unrelated origins.
 
+Add the account identifier separately:
+
+```text
+secretariat garden set-username \
+  --alias example-login \
+  --username generated-user@example.invalid
+```
+
 ## Native protocol
 
 The host name is:
@@ -121,14 +130,14 @@ Messages use Chrome/Edge native messaging framing: a four-byte native-endian siz
 Protocol version 1 currently supports:
 
 - `status` — secret-free capability information;
-- `match` — secret-free password aliases authorized for one exact origin;
-- `get` — one explicit alias/origin password request.
+- `match` — secret-free password titles, aliases, and optional usernames authorized for one exact origin;
+- `get` — one explicit alias/origin request returning its optional username metadata and password.
 
 Requests have strict action-specific fields and bounded request IDs. The native host also checks the browser-supplied extension caller origin against device configuration before reading Garden data.
 
 ## Current limitations
 
-- Password filling only; usernames are not yet a dedicated Garden field.
+- Username selection is deliberately conservative: the extension fills one visible field in the password's form, preferring `autocomplete="username"` and then one email field. It leaves ambiguous username fields untouched rather than guessing.
 - GNOME Secret Service is the first fillable backend.
 - KDBX browser filling waits for a noninteractive unlock design.
 - Save/update propagation from the extension is still disabled.

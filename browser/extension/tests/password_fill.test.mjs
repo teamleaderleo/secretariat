@@ -1,13 +1,24 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { fillPasswordField } from "../password_fill.mjs";
+import { fillLoginFields, fillPasswordField } from "../password_fill.mjs";
 
 const GENERATED_PASSWORD = "SECRETARIAT-GENERATED-ONLY-UNIT-0001";
 
 class FakeInput {
-  constructor({ disabled = false, height = 20, readOnly = false, type = "password", visible = true, width = 100 } = {}) {
+  constructor({
+    autocomplete = "",
+    disabled = false,
+    form = null,
+    height = 20,
+    readOnly = false,
+    type = "password",
+    visible = true,
+    width = 100
+  } = {}) {
+    this.autocomplete = autocomplete;
     this.disabled = disabled;
+    this.form = form;
     this.height = height;
     this.readOnly = readOnly;
     this.style = {
@@ -45,7 +56,7 @@ function installDocument(inputs, activeElement = null) {
   globalThis.document = {
     activeElement,
     querySelectorAll(selector) {
-      assert.equal(selector, 'input[type="password"]');
+      assert.equal(selector, "input");
       return inputs;
     }
   };
@@ -61,6 +72,55 @@ test("fills the only visible password field and dispatches framework-compatible 
     { bubbles: true, type: "input" },
     { bubbles: true, type: "change" }
   ]);
+});
+
+test("fills a generated username and its password in one form", () => {
+  const form = {};
+  const username = new FakeInput({ autocomplete: "username", form, type: "email" });
+  const password = new FakeInput({ form });
+  installDocument([username, password]);
+
+  assert.deepEqual(
+    fillLoginFields("generated-user@example.invalid", GENERATED_PASSWORD),
+    { ok: true, username_filled: true }
+  );
+  assert.equal(username.value, "generated-user@example.invalid");
+  assert.equal(password.value, GENERATED_PASSWORD);
+  assert.deepEqual(username.events, [
+    { bubbles: true, type: "input" },
+    { bubbles: true, type: "change" }
+  ]);
+});
+
+test("does not guess between ambiguous username fields", () => {
+  const form = {};
+  const first = new FakeInput({ form, type: "text" });
+  const second = new FakeInput({ form, type: "text" });
+  const password = new FakeInput({ form });
+  installDocument([first, second, password]);
+
+  assert.deepEqual(
+    fillLoginFields("generated-user@example.invalid", GENERATED_PASSWORD),
+    { ok: true, username_filled: false }
+  );
+  assert.equal(first.value, "");
+  assert.equal(second.value, "");
+  assert.equal(password.value, GENERATED_PASSWORD);
+});
+
+test("prefers an explicit username autocomplete field", () => {
+  const form = {};
+  const unrelated = new FakeInput({ form, type: "text" });
+  const username = new FakeInput({ autocomplete: "section-login username", form, type: "text" });
+  const password = new FakeInput({ form });
+  installDocument([unrelated, username, password]);
+
+  assert.deepEqual(
+    fillLoginFields("generated-user@example.invalid", GENERATED_PASSWORD),
+    { ok: true, username_filled: true }
+  );
+  assert.equal(unrelated.value, "");
+  assert.equal(username.value, "generated-user@example.invalid");
 });
 
 test("refuses an ambiguous page with multiple visible password fields", () => {
