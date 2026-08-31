@@ -69,13 +69,38 @@ def plan_template(group: Group) -> dict[str, Any]:
     ]
     return {
         "alias": default_alias(group.origin, group.username),
-        "title": group.title,
+        "title": _safe_plan_title(group.title, group.origin),
         "username": group.username or None,
         "provider": provider_for_origin(group.origin),
         "login": group.origin,
         "copies": copies,
         "home": copies[0]["id"] if len(copies) == 1 else None,
     }
+
+
+def plan_block_reason(group: Group) -> str | None:
+    if group.ambiguous_sources:
+        return (
+            "Different passwords exist inside one snapshot source: "
+            + ", ".join(group.ambiguous_sources)
+            + ". Clean that source before enrollment."
+        )
+    if group.username and not _valid_single_line(group.username, maximum=512):
+        return "The snapshot username cannot be represented as Garden account metadata."
+    try:
+        parsed = urlsplit(group.origin)
+        hostname = parsed.hostname
+        port = parsed.port
+    except ValueError:
+        return "The normalized login origin is invalid."
+    loopback_http = parsed.scheme == "http" and hostname in {"localhost", "127.0.0.1", "::1"}
+    if parsed.scheme != "https" and not loopback_http:
+        return "Garden enrollment requires HTTPS, except exact HTTP loopback used for generated proofs."
+    if not hostname or parsed.username or parsed.password or parsed.path not in {"", "/"} or parsed.query or parsed.fragment:
+        return "The normalized login origin cannot be represented as a Garden login link."
+    if port is not None and not 0 < port <= 65535:
+        return "The normalized login origin has an invalid port."
+    return None
 
 
 def default_alias(origin: str, username: str) -> str:
@@ -232,6 +257,16 @@ def _garden_document(entry: PlanEntry) -> dict[str, Any]:
     return document
 
 
+def _safe_plan_title(title: str, origin: str) -> str:
+    if len(title) <= 512 and _safe_text(title, allow_empty=False):
+        return title
+    try:
+        hostname = urlsplit(origin).hostname or "Web login"
+    except ValueError:
+        hostname = "Web login"
+    return hostname[:512]
+
+
 def _object(value: Any, label: str) -> dict[str, Any]:
     if not isinstance(value, dict) or any(not isinstance(key, str) for key in value):
         raise ReconciliationPlanError(f"{label} must be a JSON object")
@@ -251,14 +286,18 @@ def _text(value: Any, label: str, *, maximum: int = 512) -> str:
 
 
 def _single_line_text(value: Any, label: str) -> str:
-    if (
-        not isinstance(value, str)
-        or not value
-        or len(value) > 512
-        or any(ord(character) < 32 or ord(character) == 127 for character in value)
-    ):
+    if not _valid_single_line(value, maximum=512):
         raise ReconciliationPlanError(f"{label} is invalid")
     return value
+
+
+def _valid_single_line(value: Any, *, maximum: int) -> bool:
+    return (
+        isinstance(value, str)
+        and bool(value)
+        and len(value) <= maximum
+        and not any(ord(character) < 32 or ord(character) == 127 for character in value)
+    )
 
 
 def _safe_text(value: str, *, allow_empty: bool) -> bool:
