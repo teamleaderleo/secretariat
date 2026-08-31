@@ -60,6 +60,31 @@ def add_entry(
     _write(garden_file)
 
 
+def add_entry_documents(path: Path, entries: tuple[dict[str, Any], ...]) -> tuple[str, ...]:
+    """Append a reviewed batch of complete Garden entry documents atomically."""
+
+    if not entries:
+        raise GardenEditError("reviewed plan contains no Garden entries")
+    garden_file = _read(path)
+    existing_aliases = {entry.get("alias") for entry in garden_file.document["entries"]}
+    incoming_aliases: list[str] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise GardenEditError("reviewed plan contains an invalid Garden entry")
+        alias = entry.get("alias")
+        if not isinstance(alias, str):
+            raise GardenEditError("reviewed plan entry alias is invalid")
+        if alias in existing_aliases:
+            raise GardenEditError(f"Garden already contains reviewed alias {alias}")
+        if alias in incoming_aliases:
+            raise GardenEditError("reviewed plan contains a duplicate credential alias")
+        incoming_aliases.append(alias)
+
+    garden_file.document["entries"].extend(entries)
+    _write(garden_file)
+    return tuple(incoming_aliases)
+
+
 def attach_copy(
     path: Path,
     *,

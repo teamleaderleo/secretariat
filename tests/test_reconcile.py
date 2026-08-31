@@ -45,8 +45,10 @@ class ReconcileTests(unittest.TestCase):
             self.assertIn(("other@example.com", "single"), classes)
             self.assertEqual(report.multi_account_origins, ("https://example.com",))
             same_group = next(group for group in report.groups if group.username == "same@example.com")
+            self.assertEqual(same_group.title, "Example")
             self.assertEqual(same_group.note_sources, ("apple_passwords",))
             self.assertEqual(same_group.otp_sources, ("apple_passwords",))
+            self.assertEqual(same_group.ambiguous_sources, ())
             rendered = repr(report)
             for value in ("generated-A", "generated-old", "generated-new", "generated-note", "generated-otp"):
                 self.assertNotIn(value, rendered)
@@ -62,6 +64,24 @@ class ReconcileTests(unittest.TestCase):
             group = reconcile((SnapshotSpec("chrome_passwords", chrome),)).groups[0]
             self.assertEqual(group.classification, "duplicate")
             self.assertEqual(group.source_counts, (("chrome_passwords", 2),))
+            self.assertEqual(group.ambiguous_sources, ())
+
+    def test_same_source_conflicting_rows_are_marked_ambiguous_without_fingerprints(self):
+        with tempfile.TemporaryDirectory() as directory:
+            chrome = self.write_csv(
+                directory,
+                "chrome.csv",
+                ["name", "url", "username", "password"],
+                [
+                    ["Example", "example.com/a", "user", "generated-old"],
+                    ["Example", "example.com/b", "user", "generated-new"],
+                ],
+            )
+            group = reconcile((SnapshotSpec("chrome_passwords", chrome),)).groups[0]
+            self.assertEqual(group.classification, "conflict")
+            self.assertEqual(group.ambiguous_sources, ("chrome_passwords",))
+            self.assertNotIn("generated-old", repr(group))
+            self.assertNotIn("generated-new", repr(group))
 
     def test_missing_required_columns_and_symlink_fail(self):
         with tempfile.TemporaryDirectory() as directory:

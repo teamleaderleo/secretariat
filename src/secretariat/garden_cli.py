@@ -17,6 +17,7 @@ from .garden_edit import (
     set_login,
     set_username,
 )
+from .reconciliation_plan import ReconciliationPlanError, apply_reconciliation_plan
 
 
 def _default_garden_path() -> Path:
@@ -61,6 +62,12 @@ def parser() -> argparse.ArgumentParser:
     username.add_argument("--alias", required=True)
     username.add_argument("--username", required=True)
 
+    apply_plan = commands.add_parser(
+        "apply-plan",
+        help="Atomically add entries from a reviewed secret-free reconciliation plan",
+    )
+    apply_plan.add_argument("--plan", required=True, type=Path)
+
     detach = commands.add_parser("detach", help="Remove a replica from a logical credential")
     detach.add_argument("--alias", required=True)
     detach.add_argument("--copy-id", required=True)
@@ -103,6 +110,23 @@ def main(arguments: list[str] | None = None) -> int:
         if args.garden_command == "set-username":
             set_username(args.garden, alias=args.alias, username=args.username)
             return _success(args, "username-set", alias=args.alias)
+        if args.garden_command == "apply-plan":
+            aliases = apply_reconciliation_plan(args.garden, args.plan)
+            if args.json_output:
+                print(
+                    json.dumps(
+                        {
+                            "ok": True,
+                            "action": "plan-applied",
+                            "count": len(aliases),
+                            "aliases": list(aliases),
+                        },
+                        sort_keys=True,
+                    )
+                )
+            else:
+                print(f"applied reviewed Garden plan: {len(aliases)} entr{'y' if len(aliases) == 1 else 'ies'}")
+            return 0
         if args.garden_command == "detach":
             detach_copy(
                 args.garden,
@@ -112,7 +136,7 @@ def main(arguments: list[str] | None = None) -> int:
             )
             return _success(args, "detached", alias=args.alias, copy_id=args.copy_id)
         raise GardenEditError("Garden command is unsupported")
-    except GardenEditError as error:
+    except (GardenEditError, ReconciliationPlanError) as error:
         if args.json_output:
             print(json.dumps({"ok": False, "error": str(error)}, sort_keys=True))
         else:
