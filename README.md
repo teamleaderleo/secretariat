@@ -14,10 +14,11 @@ The public repository contains software, generated examples, tests, and document
 - duplicate, conflict, multi-account, notes-presence, and OTP-presence reporting without printing credential values;
 - a private standalone HTML reconciliation report;
 - GNOME Secret Service value access for explicitly configured home copies;
+- optional exact-UUID KDBX home read/write through PyKeePass, with entry history and encrypted-file divergence checks;
 - repository scanning for several common secret formats;
 - indexed copy types for Apple Passwords, Chrome, Edge, macOS Keychain, SSH agent, KDBX, and external providers.
 
-Platform provider integrations and the portable cross-device KDBX home are under active development.
+Apple and browser credential-provider integrations remain under development.
 
 ## Run from a checkout
 
@@ -87,7 +88,17 @@ A Garden is secret-free private metadata. A logical credential can have several 
 
 The Garden stores references and intent. It never stores the password itself.
 
-For cross-device use, the planned portable home is an encrypted KDBX database transported independently of Git. Native password managers remain useful interfaces and replicas.
+### Portable KDBX home
+
+Install the optional adapter:
+
+```text
+python -m pip install -e '.[kdbx]'
+```
+
+Then configure the encrypted database path per device. The master password stays out of the config and is prompted when the CLI opens the home. See [`docs/kdbx-home.md`](docs/kdbx-home.md) for the exact config paths, UUID contract, write behavior, and cloud-transport boundary.
+
+Native password managers remain useful interfaces and replicas around the same logical credential.
 
 ## Repository split
 
