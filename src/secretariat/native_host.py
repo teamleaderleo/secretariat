@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import sys
 from pathlib import Path
 from typing import Any, BinaryIO
@@ -20,6 +21,7 @@ from .browser_protocol import (
 )
 from .config import DeviceConfigError, default_config_path, load_device_config
 from .garden import Copy, Entry, Garden, GardenError, load_garden
+from .kdbx_agent import KDBXAgentClient, KDBXAgentError
 
 
 class NativeHostError(RuntimeError):
@@ -31,21 +33,33 @@ class NativeHostError(RuntimeError):
 
 
 class BrowserBroker:
-    def __init__(self, garden: Garden, tooling: Tooling) -> None:
+    def __init__(
+        self,
+        garden: Garden,
+        tooling: Tooling,
+        *,
+        kdbx_agent: KDBXAgentClient | None = None,
+    ) -> None:
         self._garden = garden
         self._tooling = tooling
+        self._kdbx_agent = kdbx_agent or KDBXAgentClient()
 
     def handle(self, request: BrowserRequest) -> dict[str, Any]:
+        kdbx_available = self._kdbx_agent_available()
         if request.action == "status":
             secret_service_available = self._tooling.secret_tool is not None
-            sources = ["secret_service"] if secret_service_available else []
+            sources = []
+            if secret_service_available:
+                sources.append("secret_service")
+            if kdbx_available:
+                sources.append("kdbx")
             return ok_response(
                 request.request_id,
                 capabilities={
                     "match": True,
-                    "get": secret_service_available,
+                    "get": bool(sources),
                     "get_sources": sources,
-                    "update": secret_service_available,
+                    "update": bool(sources),
                     "update_sources": sources,
                 },
             )
@@ -58,33 +72,44 @@ class BrowserBroker:
             return ok_response(
                 request.request_id,
                 credentials=[
-                    _credential_view(entry, self._tooling)
+                    _credential_view(entry, self._tooling, kdbx_available=kdbx_available)
                     for entry in matches
                     if entry.kind == "password"
                 ],
             )
 
         if request.action == "get":
-            entry, home = self._authorized_password_entry(request)
+            entry, home = self._authorized_password_entry(request, kdbx_available=kdbx_available)
             try:
-                password = backend_for(home, self._tooling).load(home)
-            except BackendError as error:
+                if home.type == "kdbx":
+                    password = self._kdbx_agent.load(home)
+                else:
+                    password = backend_for(home, self._tooling).load(home)
+            except (BackendError, KDBXAgentError) as error:
                 raise NativeHostError("backend_unavailable", "credential could not be retrieved") from error
             return ok_response(request.request_id, username=entry.username, password=password)
 
         if request.action == "update":
-            entry, home = self._authorized_password_entry(request)
+            entry, home = self._authorized_password_entry(request, kdbx_available=kdbx_available)
             if request.password is None:
                 raise NativeHostError("invalid_password", "password value is required")
             try:
-                backend_for(home, self._tooling).store(home, request.password, entry.title)
-            except BackendError as error:
+                if home.type == "kdbx":
+                    self._kdbx_agent.store(home, request.password)
+                else:
+                    backend_for(home, self._tooling).store(home, request.password, entry.title)
+            except (BackendError, KDBXAgentError) as error:
                 raise NativeHostError("backend_unavailable", "credential could not be updated") from error
             return ok_response(request.request_id, updated=True)
 
         raise NativeHostError("unsupported_action", "request action is unsupported")
 
-    def _authorized_password_entry(self, request: BrowserRequest) -> tuple[Entry, Copy]:
+    def _authorized_password_entry(
+        self,
+        request: BrowserRequest,
+        *,
+        kdbx_available: bool,
+    ) -> tuple[Entry, Copy]:
         if request.alias is None:
             raise NativeHostError("invalid_alias", "credential alias is required")
         try:
@@ -96,26 +121,42 @@ class BrowserBroker:
         if request.origin is None or not _entry_matches_origin(entry, request.origin):
             raise NativeHostError("origin_mismatch", "credential is not authorized for this page origin")
         home = entry.home_copy()
-        if home.type != "secret_service":
-            raise NativeHostError(
-                "interactive_unlock_unavailable",
-                "this credential home cannot be opened by the browser host yet",
-            )
-        if self._tooling.secret_tool is None:
-            raise NativeHostError("backend_unavailable", "GNOME Secret Service helper is unavailable")
-        return entry, home
-
-
-def _credential_view(entry: Entry, tooling: Tooling) -> dict[str, Any]:
-    home = entry.home_copy()
-    available = home.type == "secret_service" and tooling.secret_tool is not None
-    reason = None
-    if not available:
-        reason = (
-            "secret_service_helper_missing"
-            if home.type == "secret_service"
-            else "background_unlock_unavailable"
+        if home.type == "secret_service":
+            if self._tooling.secret_tool is None:
+                raise NativeHostError("backend_unavailable", "GNOME Secret Service helper is unavailable")
+            return entry, home
+        if home.type == "kdbx":
+            if not kdbx_available:
+                raise NativeHostError(
+                    "unlock_agent_unavailable",
+                    "KDBX home is locked; start the Secretariat KDBX unlock agent",
+                )
+            return entry, home
+        raise NativeHostError(
+            "backend_unavailable",
+            "this credential home is not available to the browser host",
         )
+
+    def _kdbx_agent_available(self) -> bool:
+        if not hasattr(socket, "AF_UNIX"):
+            return False
+        try:
+            return self._kdbx_agent.available()
+        except (KDBXAgentError, AttributeError):
+            return False
+
+
+def _credential_view(entry: Entry, tooling: Tooling, *, kdbx_available: bool) -> dict[str, Any]:
+    home = entry.home_copy()
+    if home.type == "secret_service":
+        available = tooling.secret_tool is not None
+        reason = None if available else "secret_service_helper_missing"
+    elif home.type == "kdbx":
+        available = kdbx_available
+        reason = None if available else "kdbx_locked"
+    else:
+        available = False
+        reason = "background_unlock_unavailable"
     return {
         "alias": entry.alias,
         "title": entry.title,
@@ -168,7 +209,7 @@ def serve(
             response = error_response(request_id if isinstance(request_id, str) else None, error.code, str(error))
         except NativeHostError as error:
             response = error_response(request_id if isinstance(request_id, str) else None, error.code, str(error))
-        except (GardenError, BackendError, DeviceConfigError):
+        except (GardenError, BackendError, DeviceConfigError, KDBXAgentError):
             response = error_response(
                 request_id if isinstance(request_id, str) else None,
                 "host_failure",
@@ -234,7 +275,7 @@ def main(arguments: list[str] | None = None) -> int:
             caller_origin=caller_origin,
             garden_path=_garden_path(),
         )
-    except (DeviceConfigError, GardenError, NativeHostError):
+    except (DeviceConfigError, GardenError, NativeHostError, KDBXAgentError):
         return 2
 
 
