@@ -48,6 +48,7 @@ class Observation:
 @dataclass(frozen=True)
 class Group:
     origin: str
+    title: str
     username: str
     classification: str
     copies: int
@@ -55,6 +56,7 @@ class Group:
     source_counts: tuple[tuple[str, int], ...]
     note_sources: tuple[str, ...]
     otp_sources: tuple[str, ...]
+    ambiguous_sources: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -161,11 +163,13 @@ def reconcile(specs: tuple[SnapshotSpec, ...]) -> Report:
     groups = []
     for key, members in sorted(grouped.items()):
         origin, _username_key = key
-        classification = _classify(tuple(members))
+        member_tuple = tuple(members)
+        classification = _classify(member_tuple)
         source_counts = tuple(sorted(Counter(member.source for member in members).items()))
         groups.append(
             Group(
                 origin=origin,
+                title=_display_title(member_tuple, origin),
                 username=display_usernames[key],
                 classification=classification,
                 copies=len(members),
@@ -173,6 +177,7 @@ def reconcile(specs: tuple[SnapshotSpec, ...]) -> Report:
                 source_counts=source_counts,
                 note_sources=tuple(sorted({member.source for member in members if member.notes})),
                 otp_sources=tuple(sorted({member.source for member in members if member.otp_auth})),
+                ambiguous_sources=_ambiguous_sources(member_tuple),
             )
         )
 
@@ -219,6 +224,31 @@ def _classify(members: tuple[Observation, ...]) -> str:
     if all(hmac.compare_digest(first, member.password) for member in members[1:]):
         return "duplicate"
     return "conflict"
+
+
+def _ambiguous_sources(members: tuple[Observation, ...]) -> tuple[str, ...]:
+    by_source: dict[str, list[Observation]] = defaultdict(list)
+    for member in members:
+        by_source[member.source].append(member)
+    ambiguous = []
+    for source, source_members in by_source.items():
+        if len(source_members) < 2:
+            continue
+        first = source_members[0].password
+        if any(not hmac.compare_digest(first, member.password) for member in source_members[1:]):
+            ambiguous.append(source)
+    return tuple(sorted(ambiguous))
+
+
+def _display_title(members: tuple[Observation, ...], origin: str) -> str:
+    for member in members:
+        if member.title:
+            return member.title
+    try:
+        hostname = urlsplit(origin).hostname
+    except ValueError:
+        hostname = None
+    return hostname or origin
 
 
 def _field_map(fieldnames: list[str]) -> dict[str, str]:
