@@ -11,17 +11,20 @@ The public repository contains software, generated examples, tests, and document
 - Garden schema v3: one logical credential, multiple copies, one explicit home;
 - `find`, `show`, `list`, expiry/rotation views, and diagnostics;
 - read-only reconciliation of Chrome, Edge, and Apple Passwords CSV snapshots;
-- duplicate, conflict, multi-account, notes-presence, and OTP-presence reporting without printing credential values;
-- a private standalone HTML reconciliation report;
+- duplicate, conflict, multi-account, notes-presence, OTP-presence, and same-source-conflict reporting without printing credential values;
+- a private standalone HTML reconciliation review that can export a strict secret-free Garden enrollment plan;
+- atomic `garden apply-plan` enrollment of reviewed reconciliation decisions without overwriting existing aliases;
 - GNOME Secret Service value access for explicitly configured home copies;
 - optional exact-UUID KDBX home read/write through PyKeePass, with entry history and encrypted-file divergence checks;
-- explicit KDBX home creation and UUID-backed entry enrollment;
+- explicit KDBX home creation, UUID-backed entry enrollment, and value-silent verification;
 - atomic secret-free Garden metadata editing;
-- a generated-data Chrome/Edge Manifest V3 + native-messaging bridge for exact-origin username/password fill;
+- a generated-data Chrome/Edge Manifest V3 + native-messaging bridge for exact-origin username/password fill and explicit password updates;
+- real generated-data Chrome/Edge proof for fill, origin/race boundaries, missing-host recovery, and browser restart;
+- a generated-data macOS AuthenticationServices capability probe for password/passkey identities and credential exchange;
 - repository scanning for several common secret formats;
 - indexed copy types for Apple Passwords, Chrome, Edge, macOS Keychain, SSH agent, KDBX, and external providers.
 
-Apple credential-provider integration, browser account/save flows, KDBX browser unlock, and real device proofs remain under development.
+Apple credential-provider packaging, KDBX browser unlock, cross-device Linux proof, and real-device proof of the browser update action remain under development.
 
 ## Run from a checkout
 
@@ -62,6 +65,17 @@ secretariat reconcile \
 ```
 
 The reconciliation engine compares passwords only in process memory. Reports contain account metadata such as sites, usernames, source names, and copy counts. They contain no password values, password-derived fingerprints, note contents, or OTP secrets.
+
+The HTML review can now turn explicit choices into `secretariat-garden-plan.json`. Select the accounts you want to enroll, edit their aliases, choose a home copy for multi-source credentials, then apply the downloaded plan to the private Garden:
+
+```text
+secretariat \
+  --garden /private/path/garden.json \
+  garden apply-plan \
+  --plan /private/path/secretariat-garden-plan.json
+```
+
+Plan application only adds new logical credentials. It validates the entire plan first, refuses existing aliases or incomplete homes, and atomically replaces the Garden only after the complete proposed Garden passes schema validation. See [`docs/reconciliation.md`](docs/reconciliation.md).
 
 ## Garden and value storage
 
@@ -106,7 +120,7 @@ Native password managers remain useful interfaces and replicas around the same l
 
 ### Chrome and Edge
 
-The first browser bridge lives under `browser/extension` and communicates with `secretariat-native-host`. It authorizes fills against an explicit Garden login URL and re-checks the active tab origin before injection. See [`docs/browser-bridge.md`](docs/browser-bridge.md) for generated-data setup and current limitations.
+The browser bridge lives under `browser/extension` and communicates with `secretariat-native-host`. It authorizes fills and explicit password updates against an explicit Garden login URL and re-checks the active tab origin before value transfer. It does not watch forms or read Chrome/Edge's built-in password databases. See [`docs/browser-bridge.md`](docs/browser-bridge.md) for generated-data setup and current limitations.
 
 ## Repository split
 
@@ -124,7 +138,8 @@ Device-specific unlock material, browser host registration, cloud credentials, a
 - Treat CSV exports from password managers as plaintext secret material.
 - Indexed copies stay unable to retrieve values until an exact adapter is implemented and reviewed.
 - Multiple copies require an explicit home before Secretariat performs value operations.
-- Reconciliation is read-only; propagation and deletion require separate explicit workflows.
+- Reconciliation reads snapshots only; reviewed plan application mutates Garden metadata only.
+- External-store propagation, source-side deletion, and replica retirement remain separate explicit workflows.
 
 See `SECURITY.md` and the docs directory for the detailed boundaries.
 
