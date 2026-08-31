@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import hmac
 import json
 import os
 import re
@@ -19,7 +20,6 @@ from typing import Any, Callable
 from .backends import BackendError, KDBXBackend, _encrypted_fingerprint, _save_database
 from .config import DeviceConfigError, default_config_path, load_device_config
 from .garden import Copy
-
 
 AGENT_PROTOCOL_VERSION = 1
 MAX_AGENT_MESSAGE_BYTES = 1_048_576
@@ -62,6 +62,10 @@ class UnlockedKDBXSession:
         self._baseline = baseline
         self._closed = False
 
+    @property
+    def active(self) -> bool:
+        return not self._closed and self._database is not None and self._baseline is not None
+
     @classmethod
     def open(cls, path: Path, password: str) -> "UnlockedKDBXSession":
         target = path.expanduser()
@@ -75,7 +79,6 @@ class UnlockedKDBXSession:
             from pykeepass import PyKeePass
         except ImportError as error:
             raise BackendError("KDBX support requires the optional secretariat[kdbx] dependency") from error
-
         baseline = _encrypted_fingerprint(target)
         try:
             database = PyKeePass(str(target), password=password)
@@ -100,7 +103,7 @@ class UnlockedKDBXSession:
         self._require_current_revision()
         entry = self._entry(entry_uuid)
         current = entry.password or ""
-        if current == value:
+        if hmac.compare_digest(current, value):
             self._require_current_revision()
             return
         entry.save_history()
@@ -119,11 +122,10 @@ class UnlockedKDBXSession:
         self._closed = True
 
     def _entry(self, entry_uuid: str):
-        source = Copy("agent", "kdbx", entry_uuid)
-        return KDBXBackend._entry(self._database, source)
+        return KDBXBackend._entry(self._database, Copy("agent", "kdbx", entry_uuid))
 
     def _require_current_revision(self) -> None:
-        if self._closed or self._database is None or self._baseline is None:
+        if not self.active:
             raise BackendError("KDBX unlock-agent session is locked")
         if _encrypted_fingerprint(self._path) != self._baseline:
             self.close()
@@ -155,8 +157,7 @@ class KDBXAgentServer:
         self._stopping = False
 
     def open(self) -> None:
-        if not hasattr(socket, "AF_UNIX"):
-            raise KDBXAgentError("unsupported_platform", "KDBX unlock agent requires Unix-domain sockets")
+        _require_unix_sockets()
         _ensure_secure_runtime_directory(self.socket_path.parent)
         _validate_socket_path_length(self.socket_path)
         _clear_stale_socket(self.socket_path)
@@ -186,9 +187,7 @@ class KDBXAgentServer:
         try:
             while not self._stopping:
                 now = self.clock()
-                if now - self.started_at >= self.ttl_seconds:
-                    break
-                if now - self.last_value_activity >= self.idle_seconds:
+                if now - self.started_at >= self.ttl_seconds or now - self.last_value_activity >= self.idle_seconds:
                     break
                 try:
                     connection, _address = self._listener.accept()
@@ -223,18 +222,25 @@ class KDBXAgentServer:
         request_id: str | None = None
         try:
             payload = _recv_message(connection)
-            request_id_value = payload.get("request_id") if isinstance(payload, dict) else None
-            request_id = request_id_value if isinstance(request_id_value, str) else None
-            request = parse_agent_request(payload)
-            response = self._dispatch(request)
+            raw_id = payload.get("request_id") if isinstance(payload, dict) else None
+            request_id = raw_id if isinstance(raw_id, str) else None
+            response = self._dispatch(parse_agent_request(payload))
         except KDBXAgentError as error:
             response = agent_error_response(request_id, error.code, str(error))
         except BackendError:
-            response = agent_error_response(request_id, "backend_failure", "KDBX unlock agent could not complete the request")
+            if not getattr(self.session, "active", True):
+                self._stopping = True
+            response = agent_error_response(
+                request_id,
+                "backend_failure",
+                "KDBX unlock agent could not complete the request",
+            )
         _send_message(connection, response)
 
     def _dispatch(self, request: AgentRequest) -> dict[str, Any]:
         if request.action == "status":
+            if not getattr(self.session, "active", True):
+                raise KDBXAgentError("locked", "KDBX unlock-agent session is locked")
             now = self.clock()
             return agent_ok_response(
                 request.request_id,
@@ -264,6 +270,8 @@ class KDBXAgentClient:
         self.timeout = timeout
 
     def available(self) -> bool:
+        if not hasattr(socket, "AF_UNIX"):
+            return False
         try:
             response = self.request("status")
         except KDBXAgentError:
@@ -272,8 +280,7 @@ class KDBXAgentClient:
 
     def load(self, source: Copy) -> str:
         _require_kdbx_copy(source)
-        response = self.request("get", entry_uuid=source.reference)
-        value = response.get("value")
+        value = self.request("get", entry_uuid=source.reference).get("value")
         if not isinstance(value, str) or not value:
             raise KDBXAgentError("invalid_response", "unlock agent returned no credential value")
         return value
@@ -282,16 +289,16 @@ class KDBXAgentClient:
         _require_kdbx_copy(source)
         if not isinstance(value, str) or not value or len(value) > MAX_AGENT_VALUE_CHARS:
             raise KDBXAgentError("invalid_value", "credential value is empty or exceeds the agent bound")
-        response = self.request("put", entry_uuid=source.reference, value=value)
-        if response.get("updated") is not True:
+        if self.request("put", entry_uuid=source.reference, value=value).get("updated") is not True:
             raise KDBXAgentError("invalid_response", "unlock agent did not confirm the update")
 
     def lock(self) -> None:
-        response = self.request("lock")
-        if response.get("locked") is not True:
+        if self.request("lock").get("locked") is not True:
             raise KDBXAgentError("invalid_response", "unlock agent did not confirm lock")
 
     def request(self, action: str, *, entry_uuid: str | None = None, value: str | None = None) -> dict[str, Any]:
+        _require_unix_sockets()
+        _validate_client_socket(self.socket_path)
         request_id = uuid.uuid4().hex
         request: dict[str, Any] = {
             "version": AGENT_PROTOCOL_VERSION,
@@ -338,14 +345,12 @@ def parse_agent_request(value: Any) -> AgentRequest:
         raise KDBXAgentError("unsupported_action", "unlock-agent action is unsupported")
     if set(value) != ACTION_FIELDS[action]:
         raise KDBXAgentError("invalid_fields", "unlock-agent request fields do not match the action")
-
     entry_uuid = None
     if action in {"get", "put"}:
         raw_uuid = value.get("uuid")
         if not isinstance(raw_uuid, str) or not ENTRY_UUID.fullmatch(raw_uuid):
             raise KDBXAgentError("invalid_uuid", "unlock-agent KDBX UUID is invalid")
         entry_uuid = raw_uuid
-
     secret = None
     if action == "put":
         raw_value = value.get("value")
@@ -379,6 +384,11 @@ def default_agent_socket_path() -> Path:
     return base / "kdbx-agent.sock"
 
 
+def _require_unix_sockets() -> None:
+    if not hasattr(socket, "AF_UNIX"):
+        raise KDBXAgentError("unsupported_platform", "KDBX unlock agent requires Unix-domain sockets")
+
+
 def _ensure_secure_runtime_directory(path: Path) -> None:
     try:
         path.mkdir(parents=True, mode=0o700, exist_ok=True)
@@ -395,6 +405,22 @@ def _ensure_secure_runtime_directory(path: Path) -> None:
         raise KDBXAgentError("runtime_directory", "unlock-agent runtime directory permissions could not be secured") from error
 
 
+def _validate_client_socket(path: Path) -> None:
+    try:
+        parent = path.parent.lstat()
+        metadata = path.lstat()
+    except OSError as error:
+        raise KDBXAgentError("agent_unavailable", "KDBX unlock agent is unavailable") from error
+    if not stat.S_ISDIR(parent.st_mode) or stat.S_ISLNK(parent.st_mode):
+        raise KDBXAgentError("socket_path", "unlock-agent runtime path is not a real directory")
+    if not stat.S_ISSOCK(metadata.st_mode):
+        raise KDBXAgentError("socket_path", "unlock-agent endpoint is not a Unix socket")
+    if hasattr(os, "getuid") and (parent.st_uid != os.getuid() or metadata.st_uid != os.getuid()):
+        raise KDBXAgentError("socket_path", "unlock-agent endpoint is not owned by this user")
+    if parent.st_mode & 0o077 or metadata.st_mode & 0o077:
+        raise KDBXAgentError("socket_path", "unlock-agent endpoint permissions are too broad")
+
+
 def _clear_stale_socket(path: Path) -> None:
     try:
         metadata = path.lstat()
@@ -406,13 +432,24 @@ def _clear_stale_socket(path: Path) -> None:
         raise KDBXAgentError("socket_path", "unlock-agent socket path is occupied by a non-socket file")
     if hasattr(os, "getuid") and metadata.st_uid != os.getuid():
         raise KDBXAgentError("socket_path", "unlock-agent socket is not owned by this user")
-    client = KDBXAgentClient(path, timeout=0.25)
-    if client.available():
-        raise KDBXAgentError("already_running", "KDBX unlock agent is already running")
+    probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
-        path.unlink()
-    except OSError as error:
-        raise KDBXAgentError("socket_path", "stale unlock-agent socket could not be removed") from error
+        probe.settimeout(0.25)
+        probe.connect(str(path))
+    except ConnectionRefusedError:
+        try:
+            path.unlink()
+        except OSError as error:
+            raise KDBXAgentError("socket_path", "stale unlock-agent socket could not be removed") from error
+        return
+    except FileNotFoundError:
+        return
+    except (OSError, TimeoutError) as error:
+        raise KDBXAgentError("socket_path", "existing unlock-agent socket could not be safely classified") from error
+    else:
+        raise KDBXAgentError("already_running", "KDBX unlock agent is already running")
+    finally:
+        probe.close()
 
 
 def _validate_socket_path_length(path: Path) -> None:
