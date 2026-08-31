@@ -90,6 +90,19 @@ def set_home(path: Path, *, alias: str, copy_id: str) -> None:
     _write(garden_file)
 
 
+def set_login(path: Path, *, alias: str, url: str) -> None:
+    garden_file = _read(path)
+    entry = _entry(garden_file.document, alias)
+    links = entry.get("links")
+    if links is None:
+        links = {}
+        entry["links"] = links
+    if not isinstance(links, dict):
+        raise GardenEditError("credential links are invalid")
+    links["login"] = url
+    _write(garden_file)
+
+
 def detach_copy(
     path: Path,
     *,
