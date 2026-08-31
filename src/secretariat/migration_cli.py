@@ -21,10 +21,12 @@ def _default_garden_path() -> Path:
 
 
 def parser() -> argparse.ArgumentParser:
-    value = argparse.ArgumentParser(prog="secretariat migrate")
+    value = argparse.ArgumentParser(prog="secretariat")
     value.add_argument("--garden", type=Path, default=_default_garden_path())
     value.add_argument("--json", action="store_true", dest="json_output")
-    commands = value.add_subparsers(dest="command", required=True)
+    top = value.add_subparsers(dest="top_command", required=True)
+    migrate = top.add_parser("migrate", help="Move reviewed credential values between supported homes")
+    commands = migrate.add_subparsers(dest="command", required=True)
     to_kdbx = commands.add_parser(
         "to-kdbx",
         help="Migrate one reviewed Chrome/Edge/Apple snapshot home into the portable KDBX home",
@@ -35,10 +37,7 @@ def parser() -> argparse.ArgumentParser:
 
 
 def main(arguments: list[str] | None = None) -> int:
-    values = list(arguments or [])
-    if values and values[0] == "migrate":
-        values = values[1:]
-    args = parser().parse_args(values)
+    args = parser().parse_args(arguments)
     try:
         if args.command != "to-kdbx":
             raise SnapshotMigrationError("migration command is unsupported")
