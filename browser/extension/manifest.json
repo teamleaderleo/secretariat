@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "Secretariat",
+  "version": "0.1.0",
+  "description": "Use password credentials explicitly managed by Secretariat.",
+  "permissions": [
+    "activeTab",
+    "nativeMessaging",
+    "scripting",
+    "tabs"
+  ],
+  "background": {
+    "service_worker": "service_worker.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Secretariat"
+  }
+}
