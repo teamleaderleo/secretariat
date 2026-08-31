@@ -1,0 +1,59 @@
+{
+  "schema_version": 3,
+  "entries": [
+    {
+      "alias": "example-api-token",
+      "title": "Example API token",
+      "kind": "api_token",
+      "provider": "example",
+      "purpose": "Demonstrate process-only injection with generated data",
+      "environment": "test",
+      "status": "active",
+      "scopes": [
+        "read:test-data"
+      ],
+      "copies": [
+        {
+          "id": "ubuntu",
+          "type": "secret_service",
+          "reference": "example-api-token"
+        }
+      ],
+      "home": "ubuntu",
+      "delivery": {
+        "type": "env",
+        "name": "EXAMPLE_API_TOKEN"
+      },
+      "created_at": "2026-08-29",
+      "rotate_by": "2026-09-29",
+      "links": {
+        "manage": "https://example.invalid/account/credentials",
+        "revoke": "https://example.invalid/account/credentials"
+      },
+      "notes": "Generated fixture only; never replace this note with a value."
+    },
+    {
+      "alias": "example-browser-login",
+      "title": "Example browser login",
+      "kind": "password",
+      "provider": "example",
+      "copies": [
+        {
+          "id": "apple",
+          "type": "apple_passwords",
+          "reference": "example.invalid/login:user@example.invalid"
+        },
+        {
+          "id": "chrome",
+          "type": "chrome_passwords",
+          "reference": "example.invalid/login:user@example.invalid"
+        }
+      ],
+      "home": "apple",
+      "links": {
+        "login": "https://example.invalid/login"
+      },
+      "notes": "Two indexed password-store copies of one logical account."
+    }
+  ]
+}
