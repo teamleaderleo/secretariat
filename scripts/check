@@ -6,5 +6,6 @@ cd "$repo_root"
 
 PYTHONPATH=src python3 -m unittest discover -s tests -v
 python3 -m compileall -q src tests scripts/secretariat
+node --test browser/extension/tests/*.test.mjs
 ./scripts/secretariat audit
 git diff --check

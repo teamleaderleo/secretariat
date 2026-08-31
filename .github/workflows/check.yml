@@ -27,6 +27,8 @@ jobs:
           python -m json.tool browser/extension/manifest.json >/dev/null
           node --check browser/extension/service_worker.js
           node --check browser/extension/popup.js
+      - name: Browser extension tests
+        run: node --test browser/extension/tests/*.test.mjs
       - name: Secret audit
         run: PYTHONPATH=src python -m secretariat audit
       - name: Diff check
