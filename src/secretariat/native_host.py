@@ -54,12 +54,7 @@ class BrowserBroker:
             return ok_response(
                 request.request_id,
                 credentials=[
-                    {
-                        "alias": entry.alias,
-                        "title": entry.title,
-                        "provider": entry.provider,
-                        "home_type": entry.home_copy().type,
-                    }
+                    _credential_view(entry, self._tooling)
                     for entry in matches
                     if entry.kind == "password"
                 ],
@@ -82,6 +77,8 @@ class BrowserBroker:
                     "interactive_unlock_unavailable",
                     "this credential home cannot be opened by the browser host yet",
                 )
+            if self._tooling.secret_tool is None:
+                raise NativeHostError("backend_unavailable", "GNOME Secret Service helper is unavailable")
             try:
                 password = backend_for(home, self._tooling).load(home)
             except BackendError as error:
@@ -89,6 +86,26 @@ class BrowserBroker:
             return ok_response(request.request_id, password=password)
 
         raise NativeHostError("unsupported_action", "request action is unsupported")
+
+
+def _credential_view(entry: Entry, tooling: Tooling) -> dict[str, Any]:
+    home = entry.home_copy()
+    fillable = home.type == "secret_service" and tooling.secret_tool is not None
+    reason = None
+    if not fillable:
+        reason = (
+            "secret_service_helper_missing"
+            if home.type == "secret_service"
+            else "background_unlock_unavailable"
+        )
+    return {
+        "alias": entry.alias,
+        "title": entry.title,
+        "provider": entry.provider,
+        "home_type": home.type,
+        "fillable": fillable,
+        "unavailable_reason": reason,
+    }
 
 
 def _entry_matches_origin(entry: Entry, origin: str) -> bool:
