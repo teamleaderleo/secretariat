@@ -13,7 +13,7 @@ The extension can:
 - after an explicit click, request one password, fill an unambiguous username field when account metadata exists, and inject the password into the focused password field or the only visible password field on the page; and
 - after a separate explicit confirmation, read the focused password field (or the only visible password field) and replace the enrolled password in a backend the browser host can already open safely.
 
-The first value backend available to the browser host is GNOME Secret Service. KDBX entries are visible as unavailable until a reviewed background unlock mechanism exists. The browser host never tries to open an interactive KDBX password prompt.
+GNOME Secret Service is directly available to the browser host when its helper is present. On macOS/Linux, KDBX homes become browser-fillable/updatable only while the explicit Secretariat KDBX unlock agent is running. The browser host never prompts for or receives the KDBX master password. See [`kdbx-agent.md`](kdbx-agent.md).
 
 ## Why there is no permanent content script
 
@@ -124,6 +124,18 @@ secretariat garden set-username \
   --username generated-user@example.invalid
 ```
 
+## Use a KDBX home from the browser
+
+On macOS/Linux, start the foreground unlock agent from an installed environment with the KDBX extra:
+
+```text
+secretariat-kdbx-agent serve
+```
+
+After the master-password prompt succeeds, the agent owns the open KDBX session. Browser native-host processes connect to its user-only Unix socket and request only exact Garden KDBX UUIDs. When the agent expires or is explicitly locked, KDBX cards return to **KDBX locked — start unlock agent** and their Fill/Update buttons are disabled.
+
+The browser native host does not need to receive the master password and does not attempt an interactive unlock itself.
+
 ## Explicit password update
 
 For a fillable/updatable credential, the popup exposes **Update saved password** separately from **Fill**. The update path:
@@ -133,10 +145,10 @@ For a fillable/updatable credential, the popup exposes **Update saved password**
 3. refuses empty or ambiguous page password fields;
 4. rechecks the active tab origin after capture and before sending the value to the native host;
 5. sends one bounded `update` message containing the alias, exact origin, and password;
-6. has the native host independently authorize that alias/origin and store it only through an already-supported backend; and
+6. has the native host independently authorize that alias/origin and store it only through an available backend; and
 7. returns only success/failure to the popup.
 
-The captured password is never placed in extension storage, ordinary output, logs, Garden metadata, or an error message. The current browser update backend is GNOME Secret Service. KDBX update from the browser stays unavailable until noninteractive unlock is designed and reviewed.
+The captured password is never placed in extension storage, ordinary output, logs, Garden metadata, or an error message. For KDBX, the value passes from the browser native host to the explicitly unlocked agent over the user-only Unix socket; the master password never travels that path.
 
 ## Native protocol
 
@@ -159,21 +171,14 @@ Requests have strict action-specific fields and bounded request IDs. The parsed 
 
 ## Real generated-data browser evidence
 
-The fill bridge has been exercised on macOS 26.6.2 with Chrome 151 and Edge 152 using temporary Gardens, generated credentials, and user-level native-host registrations. The checks covered:
+The fill bridge has been exercised on macOS 26.6.2 with Chrome 151 and Edge 152 using temporary Gardens, generated credentials, and user-level native-host registrations. The checks covered successful explicit fill, exact origin/port rejection, ambiguous-field refusal, missing-host recovery, browser restart/reconnection, and a navigation race where the destination received no credential.
 
-- successful explicit fill on an authorized loopback origin in both browsers;
-- rejection of the same page on a different loopback port;
-- refusal when two visible password fields were ambiguous, followed by exact fill after one field was focused;
-- bounded missing-host diagnostics and recovery after restoring each browser's host manifest;
-- full browser restart and native-host reconnection; and
-- a delayed-lookup navigation race in which the authorized page moved to another origin before injection and received no credential.
-
-No built-in browser password store, Apple credential store, real Garden, or real credential was used in these proofs. The explicit update path has generated unit/integration coverage in the repository and still needs the corresponding Chrome/Edge device proof before it should be treated as production-proven.
+The explicit browser update path and the new KDBX unlock-agent browser path have generated repository coverage; corresponding real-device proofs remain follow-up validation rather than a prerequisite for the code boundary.
 
 ## Current limitations
 
-- Username selection is deliberately conservative: the extension fills one visible field in the password's form, preferring `autocomplete="username"` and then one email field. It leaves ambiguous username fields untouched rather than guessing.
-- GNOME Secret Service is the first browser-fillable and browser-updatable backend.
-- KDBX browser filling/updating waits for a noninteractive unlock design.
+- Username selection is deliberately conservative and leaves ambiguous username fields untouched rather than guessing.
+- KDBX browser access currently requires a foreground unlock-agent process on macOS/Linux; there is no startup/service integration yet.
+- Windows KDBX browser IPC is not implemented.
 - Browser updates are explicit; there is no automatic save event or background form monitoring.
 - Chrome and Edge built-in password stores remain outside this provider path; reconciliation/import handles those existing copies.

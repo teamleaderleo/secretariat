@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 import tempfile
 import unittest
 import uuid
@@ -14,6 +15,7 @@ from secretariat.backends import (
     create_kdbx_home,
 )
 from secretariat.garden import Copy
+from secretariat.kdbx_agent import UnlockedKDBXSession
 
 try:
     from pykeepass import PyKeePass, create_database
@@ -54,6 +56,33 @@ class KDBXBackendIntegrationTests(unittest.TestCase):
         self.assertEqual(entry.password, "generated-new-value")
         self.assertGreaterEqual(len(entry.history), 1)
         self.assertEqual(entry.history[-1].password, "generated-old-value")
+
+    def test_unlocked_session_reuses_open_database_and_tracks_its_own_saves(self):
+        session = UnlockedKDBXSession.open(self.path, self.master_password)
+        self.addCleanup(session.close)
+        self.assertEqual(session.load(self.reference), "generated-old-value")
+        session.store(self.reference, "generated-agent-value")
+        self.assertEqual(session.load(self.reference), "generated-agent-value")
+
+        database = PyKeePass(str(self.path), password=self.master_password)
+        entry = database.find_entries(uuid=uuid.UUID(hex=self.reference), first=True)
+        self.assertEqual(entry.password, "generated-agent-value")
+        self.assertGreaterEqual(len(entry.history), 1)
+
+    def test_unlocked_session_invalidates_after_external_encrypted_revision(self):
+        session = UnlockedKDBXSession.open(self.path, self.master_password)
+        competing = Path(self.temporary.name) / "competing.kdbx"
+        shutil.copy2(self.path, competing)
+        competing_database = PyKeePass(str(competing), password=self.master_password)
+        entry = competing_database.find_entries(uuid=uuid.UUID(hex=self.reference), first=True)
+        entry.password = "generated-competing-value"
+        competing_database.save()
+        shutil.copy2(competing, self.path)
+
+        with self.assertRaisesRegex(BackendError, "changed since unlock"):
+            session.load(self.reference)
+        with self.assertRaisesRegex(BackendError, "session is locked"):
+            session.load(self.reference)
 
     def test_noncanonical_reference_fails_before_lookup(self):
         bad = Copy("portable", "kdbx", self.reference.upper())

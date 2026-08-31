@@ -28,6 +28,21 @@ class FakeBackend:
         self.stored.append((source.reference, value, label))
 
 
+class FakeAgent:
+    def __init__(self, available=False):
+        self.is_available = available
+        self.stored = []
+
+    def available(self):
+        return self.is_available
+
+    def load(self, source):
+        return "generated-kdbx-browser-password"
+
+    def store(self, source, value):
+        self.stored.append((source.reference, value))
+
+
 class NativeHostTests(unittest.TestCase):
     def garden(self, home_type="secret_service"):
         entry = Entry(
@@ -74,6 +89,13 @@ class NativeHostTests(unittest.TestCase):
         )
         return Garden((entry, other))
 
+    def broker(self, garden=None, tooling=None, *, agent_available=False):
+        return BrowserBroker(
+            garden or self.garden(),
+            tooling or Tooling("secret-tool", None, None),
+            kdbx_agent=FakeAgent(agent_available),
+        )
+
     def test_match_is_bound_to_exact_login_origin(self):
         garden = self.garden()
         second = replace(
@@ -83,7 +105,7 @@ class NativeHostTests(unittest.TestCase):
             username="generated-second-user@example.invalid",
             copies=(Copy("home", "secret_service", "second-fixture"),),
         )
-        broker = BrowserBroker(Garden((*garden.entries, second)), Tooling("secret-tool", None, None))
+        broker = self.broker(Garden((*garden.entries, second)))
         response = broker.handle(BrowserRequest("r1", "match", origin="https://example.com"))
         self.assertTrue(response["ok"])
         self.assertEqual(
@@ -97,7 +119,7 @@ class NativeHostTests(unittest.TestCase):
         self.assertTrue(all(item["updatable"] for item in response["credentials"]))
 
     def test_get_checks_origin_and_only_returns_value_after_authorization(self):
-        broker = BrowserBroker(self.garden(), Tooling("secret-tool", None, None))
+        broker = self.broker()
         with patch("secretariat.native_host.backend_for", return_value=FakeBackend()):
             response = broker.handle(
                 BrowserRequest("r1", "get", origin="https://example.com", alias="example-login")
@@ -111,7 +133,7 @@ class NativeHostTests(unittest.TestCase):
     def test_update_checks_origin_and_returns_no_value(self):
         sentinel = "SECRETARIAT-GENERATED-ONLY-UPDATE-0002"
         backend = FakeBackend()
-        broker = BrowserBroker(self.garden(), Tooling("secret-tool", None, None))
+        broker = self.broker()
         with patch("secretariat.native_host.backend_for", return_value=backend):
             response = broker.handle(
                 BrowserRequest(
@@ -139,20 +161,46 @@ class NativeHostTests(unittest.TestCase):
             )
         self.assertEqual(backend.stored, [])
 
-    def test_kdbx_browser_get_and_update_are_refused_until_noninteractive_unlock_exists(self):
-        broker = BrowserBroker(self.garden(home_type="kdbx"), Tooling(None, None, None, True))
-        with self.assertRaisesRegex(NativeHostError, "cannot be opened"):
+    def test_kdbx_home_is_visible_as_locked_without_agent(self):
+        broker = self.broker(
+            self.garden(home_type="kdbx"),
+            Tooling(None, None, None, True),
+            agent_available=False,
+        )
+        response = broker.handle(BrowserRequest("m", "match", origin="https://example.com"))
+        self.assertFalse(response["credentials"][0]["fillable"])
+        self.assertEqual(response["credentials"][0]["unavailable_reason"], "kdbx_locked")
+        with self.assertRaisesRegex(NativeHostError, "KDBX home is locked"):
             broker.handle(BrowserRequest("r", "get", origin="https://example.com", alias="example-login"))
-        with self.assertRaisesRegex(NativeHostError, "cannot be opened"):
-            broker.handle(
-                BrowserRequest(
-                    "u",
-                    "update",
-                    origin="https://example.com",
-                    alias="example-login",
-                    password="generated-update",
-                )
+
+    def test_running_agent_makes_kdbx_home_fillable_and_updatable(self):
+        agent = FakeAgent(True)
+        broker = BrowserBroker(
+            self.garden(home_type="kdbx"),
+            Tooling(None, None, None, False),
+            kdbx_agent=agent,
+        )
+        status = broker.handle(BrowserRequest("s", "status"))
+        self.assertIn("kdbx", status["capabilities"]["get_sources"])
+        match = broker.handle(BrowserRequest("m", "match", origin="https://example.com"))
+        self.assertTrue(match["credentials"][0]["fillable"])
+        self.assertTrue(match["credentials"][0]["updatable"])
+
+        response = broker.handle(BrowserRequest("g", "get", origin="https://example.com", alias="example-login"))
+        self.assertEqual(response["password"], "generated-kdbx-browser-password")
+        sentinel = "SECRETARIAT-GENERATED-ONLY-KDBX-UPDATE"
+        update = broker.handle(
+            BrowserRequest(
+                "u",
+                "update",
+                origin="https://example.com",
+                alias="example-login",
+                password=sentinel,
             )
+        )
+        self.assertTrue(update["updated"])
+        self.assertNotIn(sentinel, json.dumps(update))
+        self.assertEqual(agent.stored, [("0" * 32, sentinel)])
 
     def test_frame_round_trip_and_bounds(self):
         stream = io.BytesIO()
@@ -190,6 +238,7 @@ class NativeHostTests(unittest.TestCase):
             patch("secretariat.native_host.load_device_config", return_value=config),
             patch("secretariat.native_host.load_garden", return_value=self.garden()),
             patch("secretariat.native_host.Tooling.detect", return_value=Tooling(None, None, None)),
+            patch("secretariat.native_host.KDBXAgentClient.available", return_value=False),
         ):
             code = serve(request_stream, output, caller_origin=CALLER, garden_path=Path("unused.json"))
         self.assertEqual(code, 0)
