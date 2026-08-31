@@ -7,6 +7,7 @@ name = "secretariat"
 version = "0.7.0"
 description = "Credential index, reconciliation tool, and password-store bridge"
 requires-python = ">=3.14"
+license = "Apache-2.0"
 dependencies = []
 
 [project.optional-dependencies]
