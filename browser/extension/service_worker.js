@@ -31,7 +31,9 @@ async function handleMessage(message) {
         alias: String(item.alias || ""),
         title: String(item.title || ""),
         provider: String(item.provider || ""),
-        home_type: String(item.home_type || "")
+        home_type: String(item.home_type || ""),
+        fillable: item.fillable === true,
+        unavailable_reason: typeof item.unavailable_reason === "string" ? item.unavailable_reason : null
       }))
     };
   }
