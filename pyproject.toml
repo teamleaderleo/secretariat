@@ -4,10 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "secretariat"
-version = "0.3.0"
+version = "0.4.0"
 description = "Credential index, reconciliation tool, and password-store bridge"
 requires-python = ">=3.14"
 dependencies = []
+
+[project.optional-dependencies]
+kdbx = ["pykeepass>=4.2.0"]
 
 [project.scripts]
 secretariat = "secretariat.cli:main"
