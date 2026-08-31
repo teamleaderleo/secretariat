@@ -1,9 +1,11 @@
 import { nativeMessagingError } from "./native_error.mjs";
 import { sendNativeRequest } from "./native_request.mjs";
+import { capturePasswordField } from "./password_capture.mjs";
 import { fillLoginFields } from "./password_fill.mjs";
 
 const HOST_NAME = "com.secretariat.browser";
 const PROTOCOL_VERSION = 1;
+const MAX_BROWSER_PASSWORD_CHARS = 16_384;
 const ALIAS = /^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$/;
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -38,12 +40,13 @@ async function handleMessage(message) {
         provider: String(item.provider || ""),
         home_type: String(item.home_type || ""),
         fillable: item.fillable === true,
+        updatable: item.updatable === true,
         unavailable_reason: typeof item.unavailable_reason === "string" ? item.unavailable_reason : null
       }))
     };
   }
   if (message.action === "fill") {
-    if (typeof message.alias !== "string" || !ALIAS.test(message.alias)) {
+    if (!validAlias(message.alias)) {
       return { ok: false, error: "invalid credential alias" };
     }
     const tab = await activeHttpTab();
@@ -81,6 +84,50 @@ async function handleMessage(message) {
       ? { ok: true, username_filled: result.username_filled === true }
       : { ok: false, error: result && result.error ? result.error : "password field was not filled" };
   }
+  if (message.action === "update") {
+    if (!validAlias(message.alias)) {
+      return { ok: false, error: "invalid credential alias" };
+    }
+    const tab = await activeHttpTab();
+    const origin = canonicalOrigin(tab.url);
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: capturePasswordField
+    });
+    const result = results && results[0] ? results[0].result : null;
+    if (!result || !result.ok) {
+      return {
+        ok: false,
+        error: result && result.error ? result.error : "password field could not be read"
+      };
+    }
+    if (
+      typeof result.password !== "string"
+      || result.password.length === 0
+      || result.password.length > MAX_BROWSER_PASSWORD_CHARS
+    ) {
+      return { ok: false, error: "password field value is outside the reviewed browser bound" };
+    }
+
+    const currentTab = await chrome.tabs.get(tab.id);
+    if (typeof currentTab.url !== "string" || canonicalOrigin(currentTab.url) !== origin) {
+      return { ok: false, error: "page origin changed before update" };
+    }
+
+    let password = result.password;
+    try {
+      const response = await nativeRequest("update", {
+        origin,
+        alias: message.alias,
+        password
+      });
+      return response.ok && response.updated === true
+        ? { ok: true }
+        : { ok: false, error: nativeError(response) };
+    } finally {
+      password = null;
+    }
+  }
   if (message.action === "status") {
     const response = await nativeRequest("status", {});
     return response.ok
@@ -88,6 +135,10 @@ async function handleMessage(message) {
       : { ok: false, error: nativeError(response) };
   }
   return { ok: false, error: "unsupported request" };
+}
+
+function validAlias(value) {
+  return typeof value === "string" && ALIAS.test(value);
 }
 
 async function activeHttpTab() {

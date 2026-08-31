@@ -19,7 +19,7 @@ from .browser_protocol import (
     parse_request,
 )
 from .config import DeviceConfigError, default_config_path, load_device_config
-from .garden import Entry, Garden, GardenError, load_garden
+from .garden import Copy, Entry, Garden, GardenError, load_garden
 
 
 class NativeHostError(RuntimeError):
@@ -37,12 +37,16 @@ class BrowserBroker:
 
     def handle(self, request: BrowserRequest) -> dict[str, Any]:
         if request.action == "status":
+            secret_service_available = self._tooling.secret_tool is not None
+            sources = ["secret_service"] if secret_service_available else []
             return ok_response(
                 request.request_id,
                 capabilities={
                     "match": True,
-                    "get": self._tooling.secret_tool is not None,
-                    "get_sources": ["secret_service"] if self._tooling.secret_tool is not None else [],
+                    "get": secret_service_available,
+                    "get_sources": sources,
+                    "update": secret_service_available,
+                    "update_sources": sources,
                 },
             )
 
@@ -61,38 +65,52 @@ class BrowserBroker:
             )
 
         if request.action == "get":
-            if request.alias is None:
-                raise NativeHostError("invalid_alias", "credential alias is required")
-            try:
-                entry = self._garden.by_alias(request.alias)
-            except GardenError as error:
-                raise NativeHostError("credential_not_found", "credential alias was not found") from error
-            if entry.kind != "password":
-                raise NativeHostError("credential_kind_unsupported", "browser fill supports password credentials only")
-            if not _entry_matches_origin(entry, request.origin):
-                raise NativeHostError("origin_mismatch", "credential is not authorized for this page origin")
-            home = entry.home_copy()
-            if home.type != "secret_service":
-                raise NativeHostError(
-                    "interactive_unlock_unavailable",
-                    "this credential home cannot be opened by the browser host yet",
-                )
-            if self._tooling.secret_tool is None:
-                raise NativeHostError("backend_unavailable", "GNOME Secret Service helper is unavailable")
+            entry, home = self._authorized_password_entry(request)
             try:
                 password = backend_for(home, self._tooling).load(home)
             except BackendError as error:
                 raise NativeHostError("backend_unavailable", "credential could not be retrieved") from error
             return ok_response(request.request_id, username=entry.username, password=password)
 
+        if request.action == "update":
+            entry, home = self._authorized_password_entry(request)
+            if request.password is None:
+                raise NativeHostError("invalid_password", "password value is required")
+            try:
+                backend_for(home, self._tooling).store(home, request.password, entry.title)
+            except BackendError as error:
+                raise NativeHostError("backend_unavailable", "credential could not be updated") from error
+            return ok_response(request.request_id, updated=True)
+
         raise NativeHostError("unsupported_action", "request action is unsupported")
+
+    def _authorized_password_entry(self, request: BrowserRequest) -> tuple[Entry, Copy]:
+        if request.alias is None:
+            raise NativeHostError("invalid_alias", "credential alias is required")
+        try:
+            entry = self._garden.by_alias(request.alias)
+        except GardenError as error:
+            raise NativeHostError("credential_not_found", "credential alias was not found") from error
+        if entry.kind != "password":
+            raise NativeHostError("credential_kind_unsupported", "browser actions support password credentials only")
+        if request.origin is None or not _entry_matches_origin(entry, request.origin):
+            raise NativeHostError("origin_mismatch", "credential is not authorized for this page origin")
+        home = entry.home_copy()
+        if home.type != "secret_service":
+            raise NativeHostError(
+                "interactive_unlock_unavailable",
+                "this credential home cannot be opened by the browser host yet",
+            )
+        if self._tooling.secret_tool is None:
+            raise NativeHostError("backend_unavailable", "GNOME Secret Service helper is unavailable")
+        return entry, home
 
 
 def _credential_view(entry: Entry, tooling: Tooling) -> dict[str, Any]:
     home = entry.home_copy()
-    fillable = home.type == "secret_service" and tooling.secret_tool is not None
+    available = home.type == "secret_service" and tooling.secret_tool is not None
     reason = None
-    if not fillable:
+    if not available:
         reason = (
             "secret_service_helper_missing"
             if home.type == "secret_service"
@@ -104,7 +122,8 @@ def _credential_view(entry: Entry, tooling: Tooling) -> dict[str, Any]:
         "username": entry.username,
         "provider": entry.provider,
         "home_type": home.type,
-        "fillable": fillable,
+        "fillable": available,
+        "updatable": available,
         "unavailable_reason": reason,
     }
 

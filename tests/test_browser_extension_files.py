@@ -20,17 +20,21 @@ class BrowserExtensionFileTests(unittest.TestCase):
     def test_service_worker_uses_native_host_without_extension_storage(self):
         script = (EXTENSION / "service_worker.js").read_text(encoding="utf-8")
         request = (EXTENSION / "native_request.mjs").read_text(encoding="utf-8")
+        capture = (EXTENSION / "password_capture.mjs").read_text(encoding="utf-8")
         self.assertIn("sendNativeRequest(chrome.runtime, HOST_NAME, request)", script)
+        self.assertIn('nativeRequest("update"', script)
+        self.assertIn("capturePasswordField", script)
         self.assertIn("runtime.sendNativeMessage(hostName, request", request)
         self.assertIn("chrome.tabs.get(tab.id)", script)
-        self.assertNotIn("chrome.storage", script)
-        self.assertNotIn("chrome.storage", request)
-        self.assertNotIn("localStorage", script)
-        self.assertNotIn("localStorage", request)
+        for source in (script, request, capture):
+            self.assertNotIn("chrome.storage", source)
+            self.assertNotIn("localStorage", source)
 
-    def test_popup_inserts_metadata_as_text(self):
+    def test_popup_uses_text_metadata_and_explicit_update_confirmation(self):
         script = (EXTENSION / "popup.js").read_text(encoding="utf-8")
         self.assertIn("textContent", script)
+        self.assertIn("Update saved password", script)
+        self.assertIn("window.confirm", script)
         self.assertNotIn("innerHTML", script)
 
 
