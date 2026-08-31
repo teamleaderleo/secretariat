@@ -60,7 +60,8 @@ class ReconciliationPlanTests(unittest.TestCase):
         self.assertEqual([copy["id"] for copy in template["copies"]], ["apple", "chrome"])
         self.assertEqual(template["alias"], default_alias(group.origin, group.username))
         rendered = repr(template)
-        self.assertNotIn("password", rendered.casefold())
+        for value in ("generated-old-secret", "generated-new-secret", "generated-otp-secret"):
+            self.assertNotIn(value, rendered)
 
     def test_plan_requires_exact_fields_sources_and_home(self):
         plan = parse_reconciliation_plan(self.document())
