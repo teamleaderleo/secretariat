@@ -15,10 +15,18 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.14'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
       - name: Tests
         run: PYTHONPATH=src python -m unittest discover -s tests -v
       - name: Compile
         run: python -m compileall -q src tests scripts/secretariat
+      - name: Browser extension syntax
+        run: |
+          python -m json.tool browser/extension/manifest.json >/dev/null
+          node --check browser/extension/service_worker.js
+          node --check browser/extension/popup.js
       - name: Secret audit
         run: PYTHONPATH=src python -m secretariat audit
       - name: Diff check

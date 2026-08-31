@@ -21,6 +21,18 @@ secretariat garden add \
 
 The first copy becomes the explicit home.
 
+## Set the login URL
+
+A credential can declare the credential-free HTTPS login URL used by browser integrations:
+
+```text
+secretariat garden set-login \
+  --alias github-personal \
+  --url https://github.com/login
+```
+
+The browser bridge compares the page origin with this login URL before it will offer or retrieve the credential. It does not infer authorization from the provider name or source reference.
+
 ## Attach another copy
 
 Record an Apple, Chrome, Edge, native-keychain, or other existing replica:

@@ -13,6 +13,7 @@ from secretariat.garden_edit import (
     attach_copy,
     detach_copy,
     set_home,
+    set_login,
 )
 
 
@@ -35,10 +36,14 @@ class GardenEditTests(unittest.TestCase):
             reference="00112233445566778899aabbccddeeff",
         )
 
-    def test_add_attach_set_home_and_detach(self):
+    def test_add_attach_set_home_login_and_detach(self):
         self.add_portable()
         entry = load_garden(self.path).by_alias("example-login")
         self.assertEqual(entry.home_copy().id, "portable")
+
+        set_login(self.path, alias="example-login", url="https://example.invalid/login")
+        entry = load_garden(self.path).by_alias("example-login")
+        self.assertEqual(entry.links["login"], "https://example.invalid/login")
 
         attach_copy(
             self.path,
@@ -64,6 +69,13 @@ class GardenEditTests(unittest.TestCase):
         entry = load_garden(self.path).by_alias("example-login")
         self.assertEqual(tuple(copy.id for copy in entry.copies), ("apple",))
         self.assertEqual(entry.home_copy().id, "apple")
+
+    def test_invalid_login_url_never_replaces_garden(self):
+        self.add_portable()
+        before = self.path.read_bytes()
+        with self.assertRaisesRegex(GardenEditError, "HTTPS"):
+            set_login(self.path, alias="example-login", url="http://example.invalid/login")
+        self.assertEqual(self.path.read_bytes(), before)
 
     def test_detaching_current_home_requires_replacement(self):
         self.add_portable()

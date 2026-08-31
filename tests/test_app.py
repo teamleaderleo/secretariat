@@ -13,6 +13,7 @@ from secretariat.garden import load_garden
 
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE = ROOT / "garden.example.json"
+EXTENSION_ID = "abcdefghijklmnopabcdefghijklmnop"
 
 
 class AppDispatchTests(unittest.TestCase):
@@ -23,7 +24,28 @@ class AppDispatchTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("example-browser-login", output.getvalue())
 
-    def test_garden_add_and_attach_use_private_garden_path(self):
+    def test_browser_manifest_dispatches_without_a_garden(self):
+        output = io.StringIO()
+        with redirect_stdout(output):
+            code = app.main(
+                [
+                    "browser",
+                    "manifest",
+                    "--extension-id",
+                    EXTENSION_ID,
+                    "--host-path",
+                    "/usr/local/bin/secretariat-native-host",
+                ]
+            )
+        self.assertEqual(code, 0)
+        document = json.loads(output.getvalue())
+        self.assertEqual(document["name"], "com.secretariat.browser")
+        self.assertEqual(
+            document["allowed_origins"],
+            [f"chrome-extension://{EXTENSION_ID}/"],
+        )
+
+    def test_garden_add_set_login_and_attach_use_private_garden_path(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "garden.json"
             path.write_text(json.dumps({"schema_version": 3, "entries": []}) + "\n", encoding="utf-8")
@@ -42,6 +64,20 @@ class AppDispatchTests(unittest.TestCase):
                 ])
             self.assertEqual(code, 0)
             self.assertEqual(load_garden(path).by_alias("example-login").home_copy().id, "portable")
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                code = app.main([
+                    "--garden", str(path),
+                    "garden", "set-login",
+                    "--alias", "example-login",
+                    "--url", "https://example.invalid/login",
+                ])
+            self.assertEqual(code, 0)
+            self.assertEqual(
+                load_garden(path).by_alias("example-login").links["login"],
+                "https://example.invalid/login",
+            )
 
             output = io.StringIO()
             with redirect_stdout(output):

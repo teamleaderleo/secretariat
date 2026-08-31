@@ -8,7 +8,7 @@ import os
 import sys
 from pathlib import Path
 
-from .garden_edit import GardenEditError, add_entry, attach_copy, detach_copy, set_home
+from .garden_edit import GardenEditError, add_entry, attach_copy, detach_copy, set_home, set_login
 
 
 def _default_garden_path() -> Path:
@@ -43,6 +43,10 @@ def parser() -> argparse.ArgumentParser:
     home = commands.add_parser("set-home", help="Choose the authoritative copy")
     home.add_argument("--alias", required=True)
     home.add_argument("--copy-id", required=True)
+
+    login = commands.add_parser("set-login", help="Set the credential-free HTTPS login URL")
+    login.add_argument("--alias", required=True)
+    login.add_argument("--url", required=True)
 
     detach = commands.add_parser("detach", help="Remove a replica from a logical credential")
     detach.add_argument("--alias", required=True)
@@ -79,6 +83,9 @@ def main(arguments: list[str] | None = None) -> int:
         if args.garden_command == "set-home":
             set_home(args.garden, alias=args.alias, copy_id=args.copy_id)
             return _success(args, "home-set", alias=args.alias, copy_id=args.copy_id)
+        if args.garden_command == "set-login":
+            set_login(args.garden, alias=args.alias, url=args.url)
+            return _success(args, "login-set", alias=args.alias)
         if args.garden_command == "detach":
             detach_copy(
                 args.garden,
@@ -96,14 +103,13 @@ def main(arguments: list[str] | None = None) -> int:
         return 2
 
 
-def _success(args, action: str, *, alias: str, copy_id: str) -> int:
+def _success(args, action: str, *, alias: str, copy_id: str | None = None) -> int:
+    payload = {"ok": True, "action": action, "alias": alias}
+    if copy_id is not None:
+        payload["copy_id"] = copy_id
     if args.json_output:
-        print(
-            json.dumps(
-                {"ok": True, "action": action, "alias": alias, "copy_id": copy_id},
-                sort_keys=True,
-            )
-        )
+        print(json.dumps(payload, sort_keys=True))
     else:
-        print(f"{action}: {alias} copy={copy_id}")
+        suffix = f" copy={copy_id}" if copy_id is not None else ""
+        print(f"{action}: {alias}{suffix}")
     return 0
