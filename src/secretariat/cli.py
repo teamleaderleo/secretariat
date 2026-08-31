@@ -62,6 +62,11 @@ def parser() -> argparse.ArgumentParser:
     home_add.add_argument("--title", required=True)
     home_add.add_argument("--username", default="")
     home_add.add_argument("--url")
+    home_verify = home_commands.add_parser(
+        "verify",
+        help="Prove one enrolled KDBX value is readable without printing it",
+    )
+    home_verify.add_argument("alias")
 
     reconcile_parser = commands.add_parser(
         "reconcile",
@@ -293,6 +298,34 @@ def _home(args) -> int:
             print(json.dumps({"ok": True, "kdbx_uuid": reference}, sort_keys=True))
         else:
             print(f"kdbx_uuid: {reference}")
+        return 0
+
+    if args.home_command == "verify":
+        entry = load_garden(args.garden).by_alias(args.alias)
+        home = entry.home_copy()
+        if home.type != "kdbx":
+            raise BackendError(f"{entry.alias} does not use a KDBX home copy")
+        if entry.kind == "passkey":
+            raise BackendError("passkeys require a platform credential-provider or exchange adapter")
+        backend = backend_for(home, tooling, device_config=config)
+        backend.load(home)
+        if args.json_output:
+            print(
+                json.dumps(
+                    {
+                        "ok": True,
+                        "alias": entry.alias,
+                        "home_copy": home.id,
+                        "backend": "kdbx",
+                    },
+                    sort_keys=True,
+                )
+            )
+        else:
+            print(
+                f"verified {entry.alias} through exact KDBX home copy {home.id}; "
+                "no value was printed"
+            )
         return 0
 
     raise BackendError("home command is unsupported")

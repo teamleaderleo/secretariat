@@ -89,6 +89,14 @@ Titles and group paths are mutable and may be ambiguous, so Secretariat rejects 
 
 `copy` and `run` can read a KDBX home once the optional dependency and device path are available. Secretariat resolves exactly one entry by UUID and reads its protected Password field.
 
+On macOS, prove an enrolled entry can be unlocked and resolved without placing its value on a clipboard or exposing it to a child process:
+
+```text
+secretariat --garden /path/to/generated-garden.json home verify example-login
+```
+
+`home verify` prompts for the KDBX master password, resolves the Garden's exact home-copy UUID, requires a non-empty protected Password field, and discards the value. Its output contains only the alias and home-copy ID. This is the preferred generated-data smoke test on a Mac, where Secretariat's paste-once Wayland clipboard helper is unavailable.
+
 Passkeys are excluded from this generic value path. They remain in platform credential-provider/exchange APIs.
 
 ## Writes and conflicts
@@ -110,6 +118,8 @@ Mac provider/browser -> Secretariat -> KDBX -> Google Drive -> Linux -> Secretar
 ```
 
 Google Drive for desktop can supply the Mac path. Linux can use a separately configured Drive client such as rclone. Those transport credentials and paths stay in device configuration outside the Garden.
+
+In Finder list view, wait for Google Drive for desktop's upload progress indicator to disappear without an error. A streamed file may then be labelled `Online only`. Treat that as Mac-side transport evidence, not as the cross-device proof: the Linux side must still retrieve the same encrypted file and run `home verify` against the enrolled UUID.
 
 ## Current scope
 
