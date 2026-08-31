@@ -14,9 +14,10 @@ The public repository contains software, generated examples, tests, and document
 - duplicate, conflict, multi-account, notes-presence, OTP-presence, and same-source-conflict reporting without printing credential values;
 - a private standalone HTML reconciliation review that can export a strict secret-free Garden enrollment plan;
 - atomic `garden apply-plan` enrollment of reviewed reconciliation decisions without overwriting existing aliases;
+- explicit one-account migration from a reviewed Chrome/Edge/Apple snapshot home into a new exact-UUID portable KDBX home;
 - GNOME Secret Service value access for explicitly configured home copies;
 - optional exact-UUID KDBX home read/write through PyKeePass, with entry history and encrypted-file divergence checks;
-- explicit KDBX home creation, UUID-backed entry enrollment, and value-silent verification;
+- explicit KDBX home creation, UUID-backed entry enrollment, value-silent verification, and a foreground macOS/Linux unlock agent for browser access;
 - atomic secret-free Garden metadata editing;
 - a generated-data Chrome/Edge Manifest V3 + native-messaging bridge for exact-origin username/password fill and explicit password updates;
 - real generated-data Chrome/Edge proof for fill, origin/race boundaries, missing-host recovery, and browser restart;
@@ -24,7 +25,7 @@ The public repository contains software, generated examples, tests, and document
 - repository scanning for several common secret formats;
 - indexed copy types for Apple Passwords, Chrome, Edge, macOS Keychain, SSH agent, KDBX, and external providers.
 
-Apple credential-provider packaging, KDBX browser unlock, cross-device Linux proof, and real-device proof of the browser update action remain under development.
+Apple credential-provider packaging, cross-device Linux proof, real-device proof of KDBX browser access/update, and OS service packaging for the unlock agent remain under development.
 
 ## Run from a checkout
 
@@ -66,7 +67,7 @@ secretariat reconcile \
 
 The reconciliation engine compares passwords only in process memory. Reports contain account metadata such as sites, usernames, source names, and copy counts. They contain no password values, password-derived fingerprints, note contents, or OTP secrets.
 
-The HTML review can now turn explicit choices into `secretariat-garden-plan.json`. Select the accounts you want to enroll, edit their aliases, choose a home copy for multi-source credentials, then apply the downloaded plan to the private Garden:
+The HTML review can turn explicit choices into `secretariat-garden-plan.json`. Select the accounts you want to enroll, edit their aliases, choose a home copy for multi-source credentials, then apply the downloaded plan to the private Garden:
 
 ```text
 secretariat \
@@ -75,7 +76,18 @@ secretariat \
   --plan /private/path/secretariat-garden-plan.json
 ```
 
-Plan application only adds new logical credentials. It validates the entire plan first, refuses existing aliases or incomplete homes, and atomically replaces the Garden only after the complete proposed Garden passes schema validation. See [`docs/reconciliation.md`](docs/reconciliation.md).
+Plan application only adds new logical credentials. It validates the entire plan first, refuses existing aliases or incomplete homes, and atomically replaces the Garden only after the complete proposed Garden passes schema validation.
+
+A reviewed entry whose current home is still an indexed Chrome/Edge/Apple snapshot copy can then be promoted one account at a time into KDBX without putting its password into the review plan:
+
+```text
+secretariat \
+  --garden /private/path/garden.json \
+  migrate to-kdbx example-login \
+  --snapshot apple_passwords=/private/path/apple.csv
+```
+
+The migration requires that source to be the Garden entry's current home and resolves it by exact login origin + username. It creates a new encrypted KDBX entry, attaches the returned UUID as copy `portable`, and makes that copy home. The original snapshot copy remains recorded as a replica. See [`docs/reconciliation.md`](docs/reconciliation.md) for the two-store race/recovery behavior.
 
 ## Garden and value storage
 
@@ -116,6 +128,8 @@ python -m pip install -e '.[kdbx]'
 
 Then configure the encrypted database path per device. The master password stays out of the config and is prompted when the CLI opens the home. See [`docs/kdbx-home.md`](docs/kdbx-home.md) for the exact config paths, UUID contract, write behavior, and cloud-transport boundary.
 
+For browser access on macOS/Linux, `secretariat-kdbx-agent serve` explicitly unlocks the configured KDBX home in one foreground process and exposes only exact-UUID get/put operations through a user-only Unix socket. See [`docs/kdbx-agent.md`](docs/kdbx-agent.md).
+
 Native password managers remain useful interfaces and replicas around the same logical credential.
 
 ### Chrome and Edge
@@ -136,9 +150,10 @@ Device-specific unlock material, browser host registration, cloud credentials, a
 
 - Never commit passwords, tokens, recovery codes, TOTP seeds, private keys, passkey material, cookies, browser exports, or KDBX databases.
 - Treat CSV exports from password managers as plaintext secret material.
-- Indexed copies stay unable to retrieve values until an exact adapter is implemented and reviewed.
+- Indexed copies stay unable to retrieve values until an exact reviewed migration/provider path is used.
 - Multiple copies require an explicit home before Secretariat performs value operations.
 - Reconciliation reads snapshots only; reviewed plan application mutates Garden metadata only.
+- Snapshot-to-KDBX migration handles one explicit account/source at a time and never deletes the source copy.
 - External-store propagation, source-side deletion, and replica retirement remain separate explicit workflows.
 
 See `SECURITY.md` and the docs directory for the detailed boundaries.
