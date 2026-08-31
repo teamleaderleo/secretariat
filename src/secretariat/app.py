@@ -4,12 +4,17 @@ from __future__ import annotations
 
 import sys
 
-from . import cli, garden_cli
+from . import browser_cli, cli, garden_cli
 
 
 def main(arguments: list[str] | None = None) -> int:
     values = list(sys.argv[1:] if arguments is None else arguments)
-    return garden_cli.main(values) if _top_command(values) == "garden" else cli.main(values)
+    command = _top_command(values)
+    if command == "garden":
+        return garden_cli.main(values)
+    if command == "browser":
+        return browser_cli.main(values)
+    return cli.main(values)
 
 
 def _top_command(arguments: list[str]) -> str | None:
