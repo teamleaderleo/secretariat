@@ -3,6 +3,7 @@ __pycache__/
 .venv/
 .pytest_cache/
 .coverage
+.build/
 
 garden.json
 garden.local.json
