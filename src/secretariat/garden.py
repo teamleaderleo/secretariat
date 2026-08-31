@@ -264,8 +264,26 @@ def _parse_entry(value: Any) -> Entry:
     for label, url in links_raw.items():
         if not isinstance(url, str) or len(url) > 2_048:
             raise GardenError("credential link is invalid")
-        parsed = urlparse(url)
-        if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password:
+        try:
+            parsed = urlparse(url)
+            parsed.port
+        except ValueError as error:
+            raise GardenError("credential link is invalid") from error
+        loopback_login = (
+            label == "login"
+            and parsed.scheme == "http"
+            and parsed.hostname in {"localhost", "127.0.0.1", "::1"}
+        )
+        if (
+            (parsed.scheme != "https" and not loopback_login)
+            or not parsed.netloc
+            or parsed.username
+            or parsed.password
+        ):
+            if label == "login":
+                raise GardenError(
+                    "login link must be a credential-free HTTPS or HTTP loopback URL"
+                )
             raise GardenError("credential links must be credential-free HTTPS URLs")
         links[label] = url
 
