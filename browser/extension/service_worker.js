@@ -47,6 +47,12 @@ async function handleMessage(message) {
     if (!response.ok || typeof response.password !== "string" || response.password.length === 0) {
       return { ok: false, error: nativeError(response) };
     }
+
+    const currentTab = await chrome.tabs.get(tab.id);
+    if (typeof currentTab.url !== "string" || canonicalOrigin(currentTab.url) !== origin) {
+      return { ok: false, error: "page origin changed before fill" };
+    }
+
     const password = response.password;
     const results = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
