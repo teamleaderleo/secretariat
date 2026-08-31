@@ -13,6 +13,7 @@ from pathlib import Path
 
 from .audit import AuditError, audit_repository
 from .backends import BackendError, Tooling, backend_for, copy_paste_once
+from .config import DeviceConfigError, default_config_path, load_device_config
 from .garden import Entry, GardenError, load_garden
 from .reconcile import ReconcileError, Report, parse_snapshot_spec, reconcile
 from .report import write_reconciliation_html
@@ -103,7 +104,7 @@ def main(arguments: list[str] | None = None) -> int:
         else:
             raise GardenError("command is unsupported")
         return 0
-    except (GardenError, BackendError, AuditError, ReconcileError) as error:
+    except (GardenError, BackendError, AuditError, ReconcileError, DeviceConfigError) as error:
         if args.json_output:
             print(json.dumps({"ok": False, "error": str(error)}, sort_keys=True))
         else:
@@ -170,16 +171,20 @@ def _render_entries(entries: tuple[Entry, ...], json_output: bool) -> None:
 
 def _doctor(garden, tooling: Tooling, json_output: bool) -> None:
     source_types = sorted({copy.type for entry in garden.entries for copy in entry.copies})
-    source_support = {
-        source_type: (
-            "available"
-            if source_type == "secret_service" and tooling.secret_tool
-            else "helper_missing"
-            if source_type == "secret_service"
-            else "indexed_only"
-        )
-        for source_type in source_types
-    }
+    config = load_device_config(default_config_path())
+
+    def support(source_type: str) -> str:
+        if source_type == "secret_service":
+            return "available" if tooling.secret_tool else "helper_missing"
+        if source_type == "kdbx":
+            if not tooling.pykeepass_available:
+                return "dependency_missing"
+            if config.kdbx_path is None:
+                return "config_missing"
+            return "available" if config.kdbx_path.is_file() else "file_missing"
+        return "indexed_only"
+
+    source_support = {source_type: support(source_type) for source_type in source_types}
     report = {
         "schema_version": 3,
         "garden": "valid",
@@ -190,6 +195,13 @@ def _doctor(garden, tooling: Tooling, json_output: bool) -> None:
         "secret_service_helper": "available" if tooling.secret_tool else "missing",
         "macos_security_cli": "available" if tooling.macos_security else "missing",
         "paste_once_clipboard": "available" if tooling.wl_copy else "missing",
+        "kdbx_library": "available" if tooling.pykeepass_available else "missing",
+        "kdbx_path": "configured" if config.kdbx_path is not None else "missing",
+        "kdbx_file": (
+            "available"
+            if config.kdbx_path is not None and config.kdbx_path.is_file()
+            else "missing"
+        ),
         "value_storage_fallback": "forbidden",
         "process_environment_exposure": "selected child process tree and same-user inspection",
     }
@@ -200,9 +212,15 @@ def _doctor(garden, tooling: Tooling, json_output: bool) -> None:
             print(f"{key}: {value}")
 
 
-def _put(entry: Entry, tooling: Tooling) -> None:
+def _home_backend(entry: Entry, tooling: Tooling):
     home = entry.home_copy()
-    backend = backend_for(home, tooling)
+    if home.type == "kdbx" and entry.kind == "passkey":
+        raise BackendError("passkeys require a platform credential-provider or exchange adapter")
+    return home, backend_for(home, tooling)
+
+
+def _put(entry: Entry, tooling: Tooling) -> None:
+    home, backend = _home_backend(entry, tooling)
     value = getpass.getpass(f"Value for {entry.alias}: ")
     confirmation = getpass.getpass("Repeat value: ")
     if not value or value != confirmation:
@@ -212,8 +230,8 @@ def _put(entry: Entry, tooling: Tooling) -> None:
 
 
 def _copy(entry: Entry, tooling: Tooling) -> None:
-    home = entry.home_copy()
-    value = backend_for(home, tooling).load(home)
+    home, backend = _home_backend(entry, tooling)
+    value = backend.load(home)
     copy_paste_once(value, tooling)
     print(f"copied {entry.alias} from home copy {home.id} to a paste-once clipboard")
 
@@ -225,8 +243,8 @@ def _run(entry: Entry, tooling: Tooling, child: list[str]) -> int:
         raise GardenError("run requires a child command after --")
     if entry.delivery is None or entry.delivery.type != "env":
         raise GardenError("credential has no environment delivery")
-    home = entry.home_copy()
-    value = backend_for(home, tooling).load(home)
+    home, backend = _home_backend(entry, tooling)
+    value = backend.load(home)
     environment = os.environ.copy()
     environment[entry.delivery.name] = value
     try:
