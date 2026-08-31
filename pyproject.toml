@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "secretariat"
-version = "0.5.0"
+version = "0.6.0"
 description = "Credential index, reconciliation tool, and password-store bridge"
 requires-python = ">=3.14"
 dependencies = []
@@ -13,7 +13,7 @@ dependencies = []
 kdbx = ["pykeepass>=4.2.0"]
 
 [project.scripts]
-secretariat = "secretariat.cli:main"
+secretariat = "secretariat.app:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
