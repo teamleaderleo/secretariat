@@ -1,6 +1,6 @@
 # Chrome and Edge browser bridge
 
-Secretariat includes an early Manifest V3 browser extension and native messaging host for explicit password filling. The browser never reads Chrome or Edge's built-in password database. It talks only to the Secretariat native host registered for the extension.
+Secretariat includes a Manifest V3 browser extension and native messaging host for explicit password use and updates. The browser never reads Chrome or Edge's built-in password database. It talks only to the Secretariat native host registered for the extension.
 
 ## Current capability
 
@@ -9,8 +9,9 @@ The extension can:
 - inspect the active HTTP/HTTPS tab after the user opens the Secretariat popup;
 - ask the native host which Garden password entries explicitly authorize that page origin through `links.login`;
 - show matching titles and optional Garden usernames without sending credential values to the popup;
-- distinguish multiple accounts authorized for the same origin; and
-- after an explicit click, request one password, fill an unambiguous username field when account metadata exists, and inject the password into the focused password field or the only visible password field on the page.
+- distinguish multiple accounts authorized for the same origin;
+- after an explicit click, request one password, fill an unambiguous username field when account metadata exists, and inject the password into the focused password field or the only visible password field on the page; and
+- after a separate explicit confirmation, read the focused password field (or the only visible password field) and replace the enrolled password in a backend the browser host can already open safely.
 
 The first value backend available to the browser host is GNOME Secret Service. KDBX entries are visible as unavailable until a reviewed background unlock mechanism exists. The browser host never tries to open an interactive KDBX password prompt.
 
@@ -18,7 +19,9 @@ The first value backend available to the browser host is GNOME Secret Service. K
 
 The extension uses a popup plus the Manifest V3 service worker. It does not install a persistent content script and does not watch form submissions or keystrokes.
 
-The service worker re-reads the active tab URL for every candidate/fill action. The native host separately checks the requested origin against the credential's declared Garden login URL before a password can be returned.
+The service worker re-reads the active tab URL for every candidate/fill/update action. The native host separately checks the requested origin against the credential's declared Garden login URL before a password can be returned or replaced.
+
+Updating is deliberately user-driven. Secretariat does not observe password fields in the background, does not intercept form submissions, and does not automatically copy changes out of Chrome or Edge's built-in password manager.
 
 ## Load the extension
 
@@ -109,7 +112,7 @@ secretariat garden set-login \
   --url https://example.com/login
 ```
 
-Only the URL origin is used for matching, so that credential can fill HTTPS pages on `example.com` while remaining unavailable on unrelated origins.
+Only the URL origin is used for matching, so that credential can fill or update from HTTPS pages on `example.com` while remaining unavailable on unrelated origins.
 
 For generated browser proofs only, the `login` link may use HTTP when the host is exactly `localhost`, `127.0.0.1`, or `::1`. This makes it possible to exercise the real browser extension on a controlled loopback page without installing a development certificate. The exception applies only to the login link; `manage`, `revoke`, and `docs` links remain HTTPS-only. Never authorize a real credential for an HTTP loopback page.
 
@@ -121,6 +124,20 @@ secretariat garden set-username \
   --username generated-user@example.invalid
 ```
 
+## Explicit password update
+
+For a fillable/updatable credential, the popup exposes **Update saved password** separately from **Fill**. The update path:
+
+1. asks for confirmation before overwriting the enrolled value;
+2. reads only the focused visible writable password field, or exactly one visible writable password field when there is no focused password field;
+3. refuses empty or ambiguous page password fields;
+4. rechecks the active tab origin after capture and before sending the value to the native host;
+5. sends one bounded `update` message containing the alias, exact origin, and password;
+6. has the native host independently authorize that alias/origin and store it only through an already-supported backend; and
+7. returns only success/failure to the popup.
+
+The captured password is never placed in extension storage, ordinary output, logs, Garden metadata, or an error message. The current browser update backend is GNOME Secret Service. KDBX update from the browser stays unavailable until noninteractive unlock is designed and reviewed.
+
 ## Native protocol
 
 The host name is:
@@ -129,19 +146,20 @@ The host name is:
 com.secretariat.browser
 ```
 
-Messages use Chrome/Edge native messaging framing: a four-byte native-endian size followed by UTF-8 JSON. Secretariat accepts at most 1 MiB per request even though browsers allow larger extension-to-host messages.
+Messages use Chrome/Edge native messaging framing: a four-byte native-endian size followed by UTF-8 JSON. Secretariat accepts at most 1 MiB per request even though browsers allow larger extension-to-host messages. Browser password updates apply a tighter 16,384-character value bound.
 
 Protocol version 1 currently supports:
 
 - `status` — secret-free capability information;
-- `match` — secret-free password titles, aliases, and optional usernames authorized for one exact origin;
-- `get` — one explicit alias/origin request returning its optional username metadata and password.
+- `match` — secret-free password titles, aliases, optional usernames, and capability flags authorized for one exact origin;
+- `get` — one explicit alias/origin request returning its optional username metadata and password; and
+- `update` — one explicit alias/origin/password request that replaces the enrolled backend value and returns no credential value.
 
-Requests have strict action-specific fields and bounded request IDs. The native host also checks the browser-supplied extension caller origin against device configuration before reading Garden data.
+Requests have strict action-specific fields and bounded request IDs. The parsed update request marks the password field non-representable so normal request debugging cannot stringify it. The native host also checks the browser-supplied extension caller origin against device configuration before reading Garden data or changing a backend.
 
 ## Real generated-data browser evidence
 
-The bridge has been exercised on macOS 26.6.2 with Chrome 151 and Edge 152 using temporary Gardens, generated credentials, and user-level native-host registrations. The checks covered:
+The fill bridge has been exercised on macOS 26.6.2 with Chrome 151 and Edge 152 using temporary Gardens, generated credentials, and user-level native-host registrations. The checks covered:
 
 - successful explicit fill on an authorized loopback origin in both browsers;
 - rejection of the same page on a different loopback port;
@@ -150,14 +168,12 @@ The bridge has been exercised on macOS 26.6.2 with Chrome 151 and Edge 152 using
 - full browser restart and native-host reconnection; and
 - a delayed-lookup navigation race in which the authorized page moved to another origin before injection and received no credential.
 
-No built-in browser password store, Apple credential store, real Garden, or real credential was used in these proofs.
+No built-in browser password store, Apple credential store, real Garden, or real credential was used in these proofs. The explicit update path has generated unit/integration coverage in the repository and still needs the corresponding Chrome/Edge device proof before it should be treated as production-proven.
 
 ## Current limitations
 
 - Username selection is deliberately conservative: the extension fills one visible field in the password's form, preferring `autocomplete="username"` and then one email field. It leaves ambiguous username fields untouched rather than guessing.
-- GNOME Secret Service is the first fillable backend.
-- KDBX browser filling waits for a noninteractive unlock design.
-- Save/update propagation from the extension is still disabled.
+- GNOME Secret Service is the first browser-fillable and browser-updatable backend.
+- KDBX browser filling/updating waits for a noninteractive unlock design.
+- Browser updates are explicit; there is no automatic save event or background form monitoring.
 - Chrome and Edge built-in password stores remain outside this provider path; reconciliation/import handles those existing copies.
-
-These limitations keep the first browser bridge narrow while the save/update semantics and additional backend unlock paths are developed separately.
