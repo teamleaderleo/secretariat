@@ -34,7 +34,42 @@ Example:
 }
 ```
 
-`SECRETARIAT_CONFIG` can point at a different config file. `SECRETARIAT_KDBX_PATH` can override the KDBX path for a process. The database master password is deliberately absent from both configuration mechanisms; interactive CLI operations prompt for it when the KDBX home is opened.
+`SECRETARIAT_CONFIG` can point at a different config file. `SECRETARIAT_KDBX_PATH` can override the KDBX path for a process. The database master password is absent from both configuration mechanisms; interactive CLI operations prompt for it when the KDBX home is opened.
+
+Check setup without opening the database:
+
+```text
+secretariat home status
+```
+
+## Create the encrypted home
+
+Once the KDBX path points into an existing synced folder, create the database explicitly:
+
+```text
+secretariat home init
+```
+
+The command prompts twice for a new KDBX master password, refuses an existing target, writes an encrypted mode-0600 temporary database in the same directory, and atomically installs it. The master password is neither printed nor written to Secretariat configuration.
+
+## Add an entry
+
+Add one password-like value to the encrypted home:
+
+```text
+secretariat home add \
+  --title "Example login" \
+  --username "user@example.com" \
+  --url "https://example.com/login"
+```
+
+The command prompts twice for the credential value, then prompts for the KDBX master password. Its only credential-specific output is the stable entry UUID:
+
+```text
+kdbx_uuid: 00112233445566778899aabbccddeeff
+```
+
+That UUID can be placed into the private Garden as a KDBX copy reference. `home add` deliberately does not edit the Garden; attaching a new entry to a logical credential remains an explicit separate action.
 
 ## Garden copy
 
@@ -48,7 +83,7 @@ A KDBX copy uses the entry UUID as exactly 32 lowercase hexadecimal characters:
 }
 ```
 
-Titles and group paths are mutable and may be ambiguous, so Secretariat rejects them as KDBX identity. The current KeePassXC command-line client still lacks an exact UUID selection command; the adapter therefore uses PyKeePass's UUID lookup rather than title/path matching.
+Titles and group paths are mutable and may be ambiguous, so Secretariat rejects them as KDBX identity. The current KeePassXC command-line client still lacks an exact UUID selection command; the adapter therefore uses PyKeePass's UUID lookup instead of title/path matching.
 
 ## Reads
 
@@ -78,4 +113,4 @@ Google Drive for desktop can supply the Mac path. Linux can use a separately con
 
 ## Current scope
 
-This first adapter updates existing UUID-backed entries. Creating/enrolling new KDBX entries, key-file/hardware-key unlock, automated native-keyring unlock, and cross-revision merge UI are separate follow-up work. Generated databases should be used while exercising those flows.
+The setup commands create the home and raw UUID-backed entries. They do not import live browser/password-manager data and they do not mutate the private Garden. Key-file/hardware-key unlock, automated native-keyring unlock, Garden enrollment, and cross-revision merge UI are follow-up work. Generated databases should be used while exercising new flows.
