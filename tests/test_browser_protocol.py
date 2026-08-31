@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import unittest
 
-from secretariat.browser_protocol import BrowserProtocolError, canonical_origin, parse_request
+from secretariat.browser_protocol import (
+    MAX_BROWSER_PASSWORD_CHARS,
+    BrowserProtocolError,
+    canonical_origin,
+    parse_request,
+)
 
 
 class BrowserProtocolTests(unittest.TestCase):
@@ -36,6 +41,36 @@ class BrowserProtocolTests(unittest.TestCase):
                     "origin": "https://example.com",
                 }
             )
+
+    def test_update_request_keeps_password_out_of_repr(self):
+        sentinel = "SECRETARIAT-GENERATED-ONLY-UPDATE-0001"
+        request = parse_request(
+            {
+                "version": 1,
+                "request_id": "update-1",
+                "action": "update",
+                "origin": "https://example.com/login",
+                "alias": "example-login",
+                "password": sentinel,
+            }
+        )
+        self.assertEqual(request.origin, "https://example.com")
+        self.assertEqual(request.alias, "example-login")
+        self.assertEqual(request.password, sentinel)
+        self.assertNotIn(sentinel, repr(request))
+
+    def test_update_password_is_nonempty_and_bounded(self):
+        base = {
+            "version": 1,
+            "request_id": "update-1",
+            "action": "update",
+            "origin": "https://example.com",
+            "alias": "example-login",
+        }
+        for password in ("", "x" * (MAX_BROWSER_PASSWORD_CHARS + 1)):
+            with self.subTest(length=len(password)):
+                with self.assertRaisesRegex(BrowserProtocolError, "password value is invalid"):
+                    parse_request({**base, "password": password})
 
     def test_unknown_version_action_and_alias_fail_closed(self):
         with self.assertRaisesRegex(BrowserProtocolError, "version is unsupported"):
