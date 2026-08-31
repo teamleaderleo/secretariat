@@ -114,6 +114,54 @@ class AppDispatchTests(unittest.TestCase):
             self.assertEqual(len(entry.copies), 2)
             self.assertEqual(entry.home_copy().id, "apple")
 
+    def test_garden_apply_plan_adds_reviewed_entries(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            garden = root / "garden.json"
+            garden.write_text(json.dumps({"schema_version": 3, "entries": []}) + "\n", encoding="utf-8")
+            plan = root / "plan.json"
+            plan.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "entries": [
+                            {
+                                "alias": "reviewed-example",
+                                "title": "Reviewed example",
+                                "username": "generated-user@example.invalid",
+                                "provider": "example.invalid",
+                                "login": "https://example.invalid",
+                                "copies": [
+                                    {
+                                        "id": "chrome",
+                                        "type": "chrome_passwords",
+                                        "reference": "https://example.invalid account=generated-user@example.invalid",
+                                    }
+                                ],
+                                "home": "chrome",
+                            }
+                        ],
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            output = io.StringIO()
+            with redirect_stdout(output):
+                code = app.main(
+                    [
+                        "--garden",
+                        str(garden),
+                        "garden",
+                        "apply-plan",
+                        "--plan",
+                        str(plan),
+                    ]
+                )
+            self.assertEqual(code, 0)
+            self.assertIn("1 entry", output.getvalue())
+            self.assertEqual(load_garden(garden).by_alias("reviewed-example").home_copy().id, "chrome")
+
     def test_garden_detach_home_refuses_without_replacement(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "garden.json"
