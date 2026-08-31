@@ -1,0 +1,25 @@
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.coverage
+
+garden.json
+garden.local.json
+*.kdbx
+*.keyx
+*.age
+*.gpg
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Password-manager exports and reconciliation artifacts
+*.csv
+secretariat-review*.html
+reconciliation-*.html
+
+# Device-specific configuration
+.env
+.secretariat/
