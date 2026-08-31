@@ -12,6 +12,7 @@ from secretariat.garden_edit import GardenEditError
 from secretariat.reconcile import SnapshotSpec
 from secretariat.snapshot_migration import (
     SnapshotMigrationError,
+    SnapshotMigrationOrphanError,
     migrate_snapshot_home_to_kdbx,
     select_snapshot_value,
 )
@@ -142,7 +143,7 @@ class SnapshotMigrationTests(unittest.TestCase):
         self.assertEqual(entry.home_copy().reference, self.kdbx_uuid)
         self.assertEqual({copy.type for copy in entry.copies}, {"apple_passwords", "chrome_passwords", "kdbx"})
 
-    def test_garden_race_preserves_uuid_for_manual_recovery(self):
+    def test_garden_race_preserves_uuid_and_recovery_argv(self):
         snapshot = self.write_snapshot(
             "apple_passwords",
             [["Right", "https://example.com", "generated-user@example.invalid", "generated-value"]],
@@ -152,7 +153,7 @@ class SnapshotMigrationTests(unittest.TestCase):
             "secretariat.snapshot_migration.commit_prepared",
             side_effect=GardenEditError("Garden diverged before save; review the competing revision"),
         ):
-            with self.assertRaisesRegex(SnapshotMigrationError, self.kdbx_uuid) as captured:
+            with self.assertRaises(SnapshotMigrationOrphanError) as captured:
                 migrate_snapshot_home_to_kdbx(
                     self.garden_path,
                     "example-login",
@@ -161,8 +162,12 @@ class SnapshotMigrationTests(unittest.TestCase):
                     password_provider=lambda: "generated-master",
                     add_entry=lambda *args, **kwargs: self.kdbx_uuid,
                 )
-        self.assertIn("garden attach", str(captured.exception))
-        self.assertIn("--home", str(captured.exception))
+        error = captured.exception
+        self.assertEqual(error.kdbx_uuid, self.kdbx_uuid)
+        self.assertIn("garden", error.recovery_argv)
+        self.assertIn("attach", error.recovery_argv)
+        self.assertIn("--home", error.recovery_argv)
+        self.assertIn(self.kdbx_uuid, error.recovery_argv)
         self.assertEqual(self.garden_path.read_bytes(), before)
 
     def test_existing_portable_copy_is_refused_before_kdbx_write(self):
