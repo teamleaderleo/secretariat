@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -11,14 +11,16 @@ from urllib.parse import urlsplit
 PROTOCOL_VERSION = 1
 HOST_NAME = "com.secretariat.browser"
 MAX_MESSAGE_BYTES = 1_048_576
+MAX_BROWSER_PASSWORD_CHARS = 16_384
 REQUEST_ID = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 ALIAS = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$")
-ACTIONS = frozenset({"status", "match", "get"})
+ACTIONS = frozenset({"status", "match", "get", "update"})
 COMMON_FIELDS = frozenset({"version", "request_id", "action"})
 ACTION_FIELDS = {
     "status": COMMON_FIELDS,
     "match": COMMON_FIELDS | {"origin"},
     "get": COMMON_FIELDS | {"origin", "alias"},
+    "update": COMMON_FIELDS | {"origin", "alias", "password"},
 }
 
 
@@ -36,6 +38,7 @@ class BrowserRequest:
     action: str
     origin: str | None = None
     alias: str | None = None
+    password: str | None = field(default=None, repr=False)
 
 
 def parse_request(value: Any) -> BrowserRequest:
@@ -60,19 +63,36 @@ def parse_request(value: Any) -> BrowserRequest:
 
     origin = None
     alias = None
-    if action in {"match", "get"}:
+    password = None
+    if action in {"match", "get", "update"}:
         raw_origin = value.get("origin")
         if not isinstance(raw_origin, str):
             raise BrowserProtocolError("invalid_origin", "page origin is invalid")
         origin = canonical_origin(raw_origin)
 
-    if action == "get":
+    if action in {"get", "update"}:
         raw_alias = value.get("alias")
         if not isinstance(raw_alias, str) or not ALIAS.fullmatch(raw_alias):
             raise BrowserProtocolError("invalid_alias", "credential alias is invalid")
         alias = raw_alias
 
-    return BrowserRequest(request_id=request_id, action=action, origin=origin, alias=alias)
+    if action == "update":
+        raw_password = value.get("password")
+        if (
+            not isinstance(raw_password, str)
+            or not raw_password
+            or len(raw_password) > MAX_BROWSER_PASSWORD_CHARS
+        ):
+            raise BrowserProtocolError("invalid_password", "password value is invalid")
+        password = raw_password
+
+    return BrowserRequest(
+        request_id=request_id,
+        action=action,
+        origin=origin,
+        alias=alias,
+        password=password,
+    )
 
 
 def canonical_origin(value: str) -> str:
