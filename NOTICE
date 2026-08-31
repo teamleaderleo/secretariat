@@ -1,0 +1,4 @@
+Secretariat
+Copyright 2026 Secretariat contributors
+
+This product includes optional integration with PyKeePass, which is separately licensed under GPL-3.0. PyKeePass is not included in Secretariat's default dependency set and retains its own copyright and license terms.
