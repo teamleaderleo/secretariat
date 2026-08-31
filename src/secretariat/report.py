@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 
 from .reconcile import Group, ReconcileError, Report
-from .reconciliation_plan import plan_template
+from .reconciliation_plan import plan_block_reason, plan_template
 
 
 _CLASS_ORDER = {"conflict": 0, "duplicate": 1, "single": 2}
@@ -66,7 +66,7 @@ th {{ position: sticky; top: 0; background: Canvas; z-index: 1; }}
   <div class="card"><strong>{counts['single']}</strong>single copies</div>
   <div class="card"><strong>{counts['multi_account_origins']}</strong>multi-account sites</div>
 </section>
-<div class="callout"><strong>Review, then enroll:</strong> choose the rows you want in the Garden, edit each alias, and choose one home copy. Conflicting duplicate rows inside the same password store are blocked until that store is cleaned up because Secretariat cannot give those rows durable identities.</div>
+<div class="callout"><strong>Review, then enroll:</strong> choose the rows you want in the Garden, edit each alias, and choose one home copy. Rows Secretariat cannot represent durably are visibly blocked instead of being coerced into a lossy Garden entry.</div>
 <div class="controls">
   <button type="button" data-filter="all" aria-pressed="true">All</button>
   <button type="button" data-filter="conflict" aria-pressed="false">Conflicts</button>
@@ -193,8 +193,15 @@ def _group_row(group: Group, multi_account: bool) -> str:
         extras.append('<span class="badge">same-store conflict: ' + html.escape(", ".join(group.ambiguous_sources)) + '</span>')
 
     template = plan_template(group)
-    encoded_plan = html.escape(json.dumps({key: value for key, value in template.items() if key not in {"alias", "home"}}, separators=(",", ":")), quote=True)
-    blocked = bool(group.ambiguous_sources)
+    encoded_plan = html.escape(
+        json.dumps(
+            {key: value for key, value in template.items() if key not in {"alias", "home"}},
+            separators=(",", ":"),
+        ),
+        quote=True,
+    )
+    block_reason = plan_block_reason(group)
+    blocked = block_reason is not None
     disabled = " disabled" if blocked else ""
     checked_home = template["home"]
     options = ['<option value="">Choose home…</option>']
@@ -204,10 +211,10 @@ def _group_row(group: Group, multi_account: bool) -> str:
             f'<option value="{html.escape(copy["id"], quote=True)}"{selected}>{html.escape(copy["type"])}</option>'
         )
 
-    review = _review_text(group)
+    review = block_reason or _review_text(group)
     searchable = " ".join((group.classification, group.origin, group.username, group.title, *group.sources))
     row_class = "blocked" if blocked else ""
-    enrollment_title = "Resolve same-store conflicts first" if blocked else "Include this logical credential in the reviewed plan"
+    enrollment_title = block_reason or "Include this logical credential in the reviewed plan"
     return (
         f'<tr class="{row_class}" data-classification="{html.escape(group.classification)}" '
         f'data-search="{html.escape(searchable, quote=True)}" data-plan="{encoded_plan}">'
@@ -225,8 +232,6 @@ def _group_row(group: Group, multi_account: bool) -> str:
 
 
 def _review_text(group: Group) -> str:
-    if group.ambiguous_sources:
-        return "This account has different passwords inside one source. Clean those source rows before enrolling a durable Garden copy."
     if group.classification == "conflict":
         return "Choose the current credential's source as home before propagation."
     if group.classification == "duplicate":
