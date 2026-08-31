@@ -22,6 +22,7 @@ class GardenTests(unittest.TestCase):
         self.assertEqual(entry.due_on(), date(2026, 9, 29))
         self.assertEqual(entry.home_copy().type, "secret_service")
         browser = garden.by_alias("example-browser-login")
+        self.assertEqual(browser.username, "generated-user@example.invalid")
         self.assertEqual(len(browser.copies), 2)
         self.assertEqual(browser.home_copy().type, "apple_passwords")
         self.assertIsNone(browser.delivery)
@@ -47,6 +48,7 @@ class GardenTests(unittest.TestCase):
         }
         entry = parse_garden(document).by_alias("github-web")
         self.assertEqual(entry.status, "active")
+        self.assertIsNone(entry.username)
         self.assertEqual(entry.scopes, ())
         self.assertEqual(entry.home_copy().id, "apple")
 
@@ -105,6 +107,18 @@ class GardenTests(unittest.TestCase):
         document["entries"][0]["convenient_extra"] = "nope"
         with self.assertRaisesRegex(GardenError, "unknown field"):
             parse_garden(document)
+
+    def test_username_is_optional_single_line_account_metadata(self):
+        document = self.document()
+        document["entries"][1]["username"] = "generated-second-user@example.invalid"
+        entry = parse_garden(document).by_alias("example-browser-login")
+        self.assertEqual(entry.username, "generated-second-user@example.invalid")
+
+        for invalid in ("", "line one\nline two", "account\x7f"):
+            with self.subTest(invalid=invalid):
+                document["entries"][1]["username"] = invalid
+                with self.assertRaisesRegex(GardenError, "username is invalid"):
+                    parse_garden(document)
 
         document = self.document()
         document["entries"][0]["token_value"] = "generated-test-sentinel"

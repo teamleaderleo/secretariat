@@ -24,6 +24,7 @@ ENTRY_FIELDS = frozenset(
     {
         "alias",
         "title",
+        "username",
         "kind",
         "provider",
         "purpose",
@@ -109,6 +110,7 @@ class Delivery:
 class Entry:
     alias: str
     title: str
+    username: str | None
     kind: str
     provider: str
     purpose: str
@@ -147,6 +149,7 @@ class Entry:
         values = [
             self.alias,
             self.title,
+            self.username or "",
             self.kind,
             self.provider,
             self.purpose,
@@ -269,6 +272,7 @@ def _parse_entry(value: Any) -> Entry:
     return Entry(
         alias=_token(raw["alias"], "alias"),
         title=_text(raw["title"], "title"),
+        username=_optional_single_line_text(raw.get("username"), "username"),
         kind=_choice(raw["kind"], KINDS, "kind"),
         provider=_token(raw["provider"], "provider"),
         purpose=_text(raw.get("purpose", ""), "purpose", allow_empty=True),
@@ -350,6 +354,19 @@ def _text(value: Any, label: str, *, allow_empty: bool = False) -> str:
 
 def _optional_text(value: Any, label: str) -> str | None:
     return None if value is None else _text(value, label)
+
+
+def _optional_single_line_text(value: Any, label: str) -> str | None:
+    if value is None:
+        return None
+    if (
+        not isinstance(value, str)
+        or not value
+        or len(value) > MAX_TEXT
+        or any(ord(character) < 32 or ord(character) == 127 for character in value)
+    ):
+        raise GardenError(f"{label} is invalid")
+    return value
 
 
 def _date_or_none(value: Any, label: str) -> date | None:

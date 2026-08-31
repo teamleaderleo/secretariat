@@ -29,6 +29,7 @@ def add_entry(
     *,
     alias: str,
     title: str,
+    username: str | None = None,
     kind: str,
     provider: str,
     copy_id: str,
@@ -39,22 +40,23 @@ def add_entry(
     entries = garden_file.document["entries"]
     if any(entry.get("alias") == alias for entry in entries):
         raise GardenEditError("Garden already contains that credential alias")
-    entries.append(
-        {
-            "alias": alias,
-            "title": title,
-            "kind": kind,
-            "provider": provider,
-            "copies": [
-                {
-                    "id": copy_id,
-                    "type": copy_type,
-                    "reference": reference,
-                }
-            ],
-            "home": copy_id,
-        }
-    )
+    entry = {
+        "alias": alias,
+        "title": title,
+        "kind": kind,
+        "provider": provider,
+        "copies": [
+            {
+                "id": copy_id,
+                "type": copy_type,
+                "reference": reference,
+            }
+        ],
+        "home": copy_id,
+    }
+    if username is not None:
+        entry["username"] = username
+    entries.append(entry)
     _write(garden_file)
 
 
@@ -100,6 +102,13 @@ def set_login(path: Path, *, alias: str, url: str) -> None:
     if not isinstance(links, dict):
         raise GardenEditError("credential links are invalid")
     links["login"] = url
+    _write(garden_file)
+
+
+def set_username(path: Path, *, alias: str, username: str) -> None:
+    garden_file = _read(path)
+    entry = _entry(garden_file.document, alias)
+    entry["username"] = username
     _write(garden_file)
 
 

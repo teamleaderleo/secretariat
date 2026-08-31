@@ -83,7 +83,7 @@ class BrowserBroker:
                 password = backend_for(home, self._tooling).load(home)
             except BackendError as error:
                 raise NativeHostError("backend_unavailable", "credential could not be retrieved") from error
-            return ok_response(request.request_id, password=password)
+            return ok_response(request.request_id, username=entry.username, password=password)
 
         raise NativeHostError("unsupported_action", "request action is unsupported")
 
@@ -101,6 +101,7 @@ def _credential_view(entry: Entry, tooling: Tooling) -> dict[str, Any]:
     return {
         "alias": entry.alias,
         "title": entry.title,
+        "username": entry.username,
         "provider": entry.provider,
         "home_type": home.type,
         "fillable": fillable,

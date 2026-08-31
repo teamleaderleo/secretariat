@@ -35,6 +35,7 @@
     {
       "alias": "example-browser-login",
       "title": "Example browser login",
+      "username": "generated-user@example.invalid",
       "kind": "password",
       "provider": "example",
       "copies": [

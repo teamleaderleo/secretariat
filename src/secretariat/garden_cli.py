@@ -8,7 +8,15 @@ import os
 import sys
 from pathlib import Path
 
-from .garden_edit import GardenEditError, add_entry, attach_copy, detach_copy, set_home, set_login
+from .garden_edit import (
+    GardenEditError,
+    add_entry,
+    attach_copy,
+    detach_copy,
+    set_home,
+    set_login,
+    set_username,
+)
 
 
 def _default_garden_path() -> Path:
@@ -27,6 +35,7 @@ def parser() -> argparse.ArgumentParser:
     add = commands.add_parser("add", help="Add one logical credential with its first copy")
     add.add_argument("--alias", required=True)
     add.add_argument("--title", required=True)
+    add.add_argument("--username")
     add.add_argument("--kind", required=True)
     add.add_argument("--provider", required=True)
     add.add_argument("--copy-id", required=True)
@@ -48,6 +57,10 @@ def parser() -> argparse.ArgumentParser:
     login.add_argument("--alias", required=True)
     login.add_argument("--url", required=True)
 
+    username = commands.add_parser("set-username", help="Set the non-secret account username")
+    username.add_argument("--alias", required=True)
+    username.add_argument("--username", required=True)
+
     detach = commands.add_parser("detach", help="Remove a replica from a logical credential")
     detach.add_argument("--alias", required=True)
     detach.add_argument("--copy-id", required=True)
@@ -63,6 +76,7 @@ def main(arguments: list[str] | None = None) -> int:
                 args.garden,
                 alias=args.alias,
                 title=args.title,
+                username=args.username,
                 kind=args.kind,
                 provider=args.provider,
                 copy_id=args.copy_id,
@@ -86,6 +100,9 @@ def main(arguments: list[str] | None = None) -> int:
         if args.garden_command == "set-login":
             set_login(args.garden, alias=args.alias, url=args.url)
             return _success(args, "login-set", alias=args.alias)
+        if args.garden_command == "set-username":
+            set_username(args.garden, alias=args.alias, username=args.username)
+            return _success(args, "username-set", alias=args.alias)
         if args.garden_command == "detach":
             detach_copy(
                 args.garden,

@@ -56,6 +56,7 @@ class AppDispatchTests(unittest.TestCase):
                     "garden", "add",
                     "--alias", "example-login",
                     "--title", "Example login",
+                    "--username", "generated-user@example.invalid",
                     "--kind", "password",
                     "--provider", "example",
                     "--copy-id", "portable",
@@ -64,6 +65,10 @@ class AppDispatchTests(unittest.TestCase):
                 ])
             self.assertEqual(code, 0)
             self.assertEqual(load_garden(path).by_alias("example-login").home_copy().id, "portable")
+            self.assertEqual(
+                load_garden(path).by_alias("example-login").username,
+                "generated-user@example.invalid",
+            )
 
             output = io.StringIO()
             with redirect_stdout(output):
@@ -77,6 +82,20 @@ class AppDispatchTests(unittest.TestCase):
             self.assertEqual(
                 load_garden(path).by_alias("example-login").links["login"],
                 "https://example.invalid/login",
+            )
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                code = app.main([
+                    "--garden", str(path),
+                    "garden", "set-username",
+                    "--alias", "example-login",
+                    "--username", "generated-second-user@example.invalid",
+                ])
+            self.assertEqual(code, 0)
+            self.assertEqual(
+                load_garden(path).by_alias("example-login").username,
+                "generated-second-user@example.invalid",
             )
 
             output = io.StringIO()

@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -26,6 +27,7 @@ class NativeHostTests(unittest.TestCase):
         entry = Entry(
             alias="example-login",
             title="Example login",
+            username="generated-user@example.invalid",
             kind="password",
             provider="example",
             purpose="",
@@ -46,6 +48,7 @@ class NativeHostTests(unittest.TestCase):
         other = Entry(
             alias="other-login",
             title="Other login",
+            username="other-generated-user@example.invalid",
             kind="password",
             provider="other",
             purpose="",
@@ -66,10 +69,24 @@ class NativeHostTests(unittest.TestCase):
         return Garden((entry, other))
 
     def test_match_is_bound_to_exact_login_origin(self):
-        broker = BrowserBroker(self.garden(), Tooling("secret-tool", None, None))
+        garden = self.garden()
+        second = replace(
+            garden.entries[0],
+            alias="example-login-second",
+            title="Example login second account",
+            username="generated-second-user@example.invalid",
+            copies=(Copy("home", "secret_service", "second-fixture"),),
+        )
+        broker = BrowserBroker(Garden((*garden.entries, second)), Tooling("secret-tool", None, None))
         response = broker.handle(BrowserRequest("r1", "match", origin="https://example.com"))
         self.assertTrue(response["ok"])
-        self.assertEqual([item["alias"] for item in response["credentials"]], ["example-login"])
+        self.assertEqual(
+            [(item["alias"], item["username"]) for item in response["credentials"]],
+            [
+                ("example-login", "generated-user@example.invalid"),
+                ("example-login-second", "generated-second-user@example.invalid"),
+            ],
+        )
 
     def test_get_checks_origin_and_only_returns_value_after_authorization(self):
         broker = BrowserBroker(self.garden(), Tooling("secret-tool", None, None))
@@ -78,6 +95,7 @@ class NativeHostTests(unittest.TestCase):
                 BrowserRequest("r1", "get", origin="https://example.com", alias="example-login")
             )
         self.assertEqual(response["password"], "generated-browser-password")
+        self.assertEqual(response["username"], "generated-user@example.invalid")
 
         with self.assertRaisesRegex(NativeHostError, "not authorized"):
             broker.handle(BrowserRequest("r2", "get", origin="https://evil.example", alias="example-login"))

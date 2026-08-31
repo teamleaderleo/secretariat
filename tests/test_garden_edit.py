@@ -14,6 +14,7 @@ from secretariat.garden_edit import (
     detach_copy,
     set_home,
     set_login,
+    set_username,
 )
 
 
@@ -29,6 +30,7 @@ class GardenEditTests(unittest.TestCase):
             self.path,
             alias="example-login",
             title="Example login",
+            username=None,
             kind="password",
             provider="example",
             copy_id="portable",
@@ -44,6 +46,14 @@ class GardenEditTests(unittest.TestCase):
         set_login(self.path, alias="example-login", url="https://example.invalid/login")
         entry = load_garden(self.path).by_alias("example-login")
         self.assertEqual(entry.links["login"], "https://example.invalid/login")
+
+        set_username(
+            self.path,
+            alias="example-login",
+            username="generated-user@example.invalid",
+        )
+        entry = load_garden(self.path).by_alias("example-login")
+        self.assertEqual(entry.username, "generated-user@example.invalid")
 
         attach_copy(
             self.path,
@@ -75,6 +85,13 @@ class GardenEditTests(unittest.TestCase):
         before = self.path.read_bytes()
         with self.assertRaisesRegex(GardenEditError, "HTTPS"):
             set_login(self.path, alias="example-login", url="http://example.invalid/login")
+        self.assertEqual(self.path.read_bytes(), before)
+
+    def test_invalid_username_never_replaces_garden(self):
+        self.add_portable()
+        before = self.path.read_bytes()
+        with self.assertRaisesRegex(GardenEditError, "username is invalid"):
+            set_username(self.path, alias="example-login", username="line one\nline two")
         self.assertEqual(self.path.read_bytes(), before)
 
     def test_detaching_current_home_requires_replacement(self):
@@ -117,6 +134,7 @@ class GardenEditTests(unittest.TestCase):
                     self.path,
                     alias="example-login",
                     title="Example login",
+                    username=None,
                     kind="password",
                     provider="example",
                     copy_id="portable",
