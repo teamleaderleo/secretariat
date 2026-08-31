@@ -6,7 +6,13 @@ import uuid
 from pathlib import Path
 from unittest.mock import patch
 
-from secretariat.backends import BackendError, KDBXBackend, _encrypted_fingerprint
+from secretariat.backends import (
+    BackendError,
+    KDBXBackend,
+    _encrypted_fingerprint,
+    add_kdbx_entry,
+    create_kdbx_home,
+)
 from secretariat.garden import Copy
 
 try:
@@ -64,6 +70,32 @@ class KDBXBackendIntegrationTests(unittest.TestCase):
         database = PyKeePass(str(self.path), password=self.master_password)
         entry = database.find_entries(uuid=uuid.UUID(hex=self.reference), first=True)
         self.assertEqual(entry.password, "generated-old-value")
+
+    def test_create_home_and_add_entry_round_trip(self):
+        home = Path(self.temporary.name) / "new-home.kdbx"
+        create_kdbx_home(home, self.master_password)
+        self.assertTrue(home.is_file())
+        self.assertEqual(home.stat().st_mode & 0o777, 0o600)
+
+        reference = add_kdbx_entry(
+            home,
+            lambda: self.master_password,
+            title="Added fixture",
+            username="generated-user@example.invalid",
+            url="https://example.invalid/login",
+            value="generated-added-value",
+        )
+        self.assertRegex(reference, r"^[0-9a-f]{32}$")
+
+        backend = KDBXBackend(home, lambda: self.master_password)
+        self.assertEqual(
+            backend.load(Copy("portable", "kdbx", reference)),
+            "generated-added-value",
+        )
+
+    def test_create_home_refuses_existing_file(self):
+        with self.assertRaisesRegex(BackendError, "already exists"):
+            create_kdbx_home(self.path, self.master_password)
 
 
 if __name__ == "__main__":

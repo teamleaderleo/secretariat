@@ -10,9 +10,17 @@ import subprocess
 import sys
 from datetime import date, timedelta
 from pathlib import Path
+from urllib.parse import urlparse
 
 from .audit import AuditError, audit_repository
-from .backends import BackendError, Tooling, backend_for, copy_paste_once
+from .backends import (
+    BackendError,
+    Tooling,
+    add_kdbx_entry,
+    backend_for,
+    copy_paste_once,
+    create_kdbx_home,
+)
 from .config import DeviceConfigError, default_config_path, load_device_config
 from .garden import Entry, GardenError, load_garden
 from .reconcile import ReconcileError, Report, parse_snapshot_spec, reconcile
@@ -45,6 +53,16 @@ def parser() -> argparse.ArgumentParser:
     run = commands.add_parser("run", help="Inject one home value into one child process")
     run.add_argument("alias")
     run.add_argument("child", nargs=argparse.REMAINDER)
+
+    home = commands.add_parser("home", help="Set up and inspect the portable KDBX home")
+    home_commands = home.add_subparsers(dest="home_command", required=True)
+    home_commands.add_parser("status", help="Inspect portable-home readiness without opening it")
+    home_commands.add_parser("init", help="Create a new encrypted KDBX home at the configured path")
+    home_add = home_commands.add_parser("add", help="Add one value and print its stable KDBX UUID")
+    home_add.add_argument("--title", required=True)
+    home_add.add_argument("--username", default="")
+    home_add.add_argument("--url")
+
     reconcile_parser = commands.add_parser(
         "reconcile",
         help="Compare temporary password-manager CSV snapshots without printing values",
@@ -73,6 +91,8 @@ def main(arguments: list[str] | None = None) -> int:
             return _audit(args)
         if args.command == "reconcile":
             return _reconcile(args)
+        if args.command == "home":
+            return _home(args)
         garden = load_garden(args.garden)
         tooling = Tooling.detect()
         if args.command == "list":
@@ -210,6 +230,91 @@ def _doctor(garden, tooling: Tooling, json_output: bool) -> None:
     else:
         for key, value in report.items():
             print(f"{key}: {value}")
+
+
+def _home(args) -> int:
+    tooling = Tooling.detect()
+    config_path = default_config_path()
+    config = load_device_config(config_path)
+    path = config.kdbx_path
+
+    if args.home_command == "status":
+        report = {
+            "config": "available" if config_path.is_file() else "default_or_environment",
+            "kdbx_library": "available" if tooling.pykeepass_available else "missing",
+            "kdbx_path": "configured" if path is not None else "missing",
+            "kdbx_file": "available" if path is not None and path.is_file() else "missing",
+        }
+        if args.json_output:
+            print(json.dumps(report, indent=2, sort_keys=True))
+        else:
+            for key, value in report.items():
+                print(f"{key}: {value}")
+        return 0
+
+    if not tooling.pykeepass_available:
+        raise BackendError("KDBX support requires the optional secretariat[kdbx] dependency")
+    if path is None:
+        raise BackendError("KDBX home path is not configured on this device")
+
+    if args.home_command == "init":
+        password = getpass.getpass("New KDBX master password: ")
+        confirmation = getpass.getpass("Repeat KDBX master password: ")
+        if not password or password != confirmation:
+            raise BackendError("KDBX master passwords were empty or did not match")
+        create_kdbx_home(path, password)
+        if args.json_output:
+            print(json.dumps({"ok": True, "home": "created"}, sort_keys=True))
+        else:
+            print("created encrypted KDBX home at the configured device path")
+        return 0
+
+    if args.home_command == "add":
+        title = _bounded_cli_text(args.title, "title", allow_empty=False)
+        username = _bounded_cli_text(args.username, "username", allow_empty=True)
+        url = _validated_cli_url(args.url)
+        value = getpass.getpass("Credential value: ")
+        confirmation = getpass.getpass("Repeat credential value: ")
+        if not value or value != confirmation:
+            raise BackendError("credential values were empty or did not match")
+
+        def unlock():
+            return getpass.getpass("KDBX master password: ")
+
+        reference = add_kdbx_entry(
+            path,
+            unlock,
+            title=title,
+            username=username,
+            url=url,
+            value=value,
+        )
+        if args.json_output:
+            print(json.dumps({"ok": True, "kdbx_uuid": reference}, sort_keys=True))
+        else:
+            print(f"kdbx_uuid: {reference}")
+        return 0
+
+    raise BackendError("home command is unsupported")
+
+
+def _bounded_cli_text(value: str, label: str, *, allow_empty: bool) -> str:
+    if not isinstance(value, str) or len(value) > 512 or (not allow_empty and not value.strip()):
+        raise BackendError(f"{label} is invalid")
+    if any(ord(character) < 32 and character not in "\n\t" for character in value):
+        raise BackendError(f"{label} is invalid")
+    return value.strip() if not allow_empty else value
+
+
+def _validated_cli_url(value: str | None) -> str | None:
+    if value is None:
+        return None
+    if len(value) > 2_048:
+        raise BackendError("URL is invalid")
+    parsed = urlparse(value)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.username or parsed.password:
+        raise BackendError("URL must be a credential-free HTTP or HTTPS URL")
+    return value
 
 
 def _home_backend(entry: Entry, tooling: Tooling):

@@ -25,8 +25,8 @@ class FakeBackend:
 
 
 class CliTests(unittest.TestCase):
-    def tooling(self, secret_tool=None, wl_copy=None, macos_security=None):
-        return cli.Tooling(secret_tool, wl_copy, macos_security)
+    def tooling(self, secret_tool=None, wl_copy=None, macos_security=None, pykeepass=False):
+        return cli.Tooling(secret_tool, wl_copy, macos_security, pykeepass)
 
     def test_external_garden_environment_variable(self):
         output = io.StringIO()
@@ -40,6 +40,87 @@ class CliTests(unittest.TestCase):
         with patch.dict(os.environ, {"SECRETARIAT_GARDEN": "/does/not/exist"}), redirect_stdout(output):
             code = cli.main(["--garden", str(EXAMPLE), "find", "chrome"])
         self.assertEqual(code, 0)
+
+    def test_home_status_does_not_require_a_garden(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "portable.kdbx"
+            config = type("Config", (), {"kdbx_path": path})()
+            output = io.StringIO()
+            with (
+                patch("secretariat.cli.Tooling.detect", return_value=self.tooling(pykeepass=True)),
+                patch("secretariat.cli.load_device_config", return_value=config),
+                patch("secretariat.cli.default_config_path", return_value=Path(directory) / "config.json"),
+                redirect_stdout(output),
+            ):
+                code = cli.main(["home", "status"])
+        self.assertEqual(code, 0)
+        self.assertIn("kdbx_path: configured", output.getvalue())
+        self.assertIn("kdbx_file: missing", output.getvalue())
+
+    def test_home_init_prompts_without_printing_master_password(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "portable.kdbx"
+            config = type("Config", (), {"kdbx_path": path})()
+            output = io.StringIO()
+            errors = io.StringIO()
+            master = "generated-master-password"
+            with (
+                patch("secretariat.cli.Tooling.detect", return_value=self.tooling(pykeepass=True)),
+                patch("secretariat.cli.load_device_config", return_value=config),
+                patch("secretariat.cli.default_config_path", return_value=Path(directory) / "config.json"),
+                patch("secretariat.cli.getpass.getpass", side_effect=[master, master]),
+                patch("secretariat.cli.create_kdbx_home") as create,
+                redirect_stdout(output),
+                redirect_stderr(errors),
+            ):
+                code = cli.main(["home", "init"])
+            self.assertEqual(code, 0)
+            create.assert_called_once_with(path, master)
+            self.assertNotIn(master, output.getvalue() + errors.getvalue())
+
+    def test_home_add_prints_uuid_only_and_keeps_values_out_of_output(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "portable.kdbx"
+            config = type("Config", (), {"kdbx_path": path})()
+            output = io.StringIO()
+            errors = io.StringIO()
+            value = "generated-credential-value"
+            master = "generated-master-password"
+            reference = "00112233445566778899aabbccddeeff"
+            observed = {}
+
+            def fake_add(kdbx_path, password_provider, *, title, username, url, value):
+                observed["path"] = kdbx_path
+                observed["master"] = password_provider()
+                observed["title"] = title
+                observed["username"] = username
+                observed["url"] = url
+                observed["value"] = value
+                return reference
+
+            with (
+                patch("secretariat.cli.Tooling.detect", return_value=self.tooling(pykeepass=True)),
+                patch("secretariat.cli.load_device_config", return_value=config),
+                patch("secretariat.cli.default_config_path", return_value=Path(directory) / "config.json"),
+                patch("secretariat.cli.getpass.getpass", side_effect=[value, value, master]),
+                patch("secretariat.cli.add_kdbx_entry", side_effect=fake_add),
+                redirect_stdout(output),
+                redirect_stderr(errors),
+            ):
+                code = cli.main([
+                    "home", "add",
+                    "--title", "Example",
+                    "--username", "user@example.invalid",
+                    "--url", "https://example.invalid/login",
+                ])
+            self.assertEqual(code, 0)
+            self.assertEqual(observed["path"], path)
+            self.assertEqual(observed["master"], master)
+            self.assertEqual(observed["value"], value)
+            self.assertIn(reference, output.getvalue())
+            rendered = output.getvalue() + errors.getvalue()
+            self.assertNotIn(value, rendered)
+            self.assertNotIn(master, rendered)
 
     def test_indexed_only_home_refuses_value_access(self):
         errors = io.StringIO()

@@ -120,31 +120,7 @@ class KDBXBackend:
         entry.save_history()
         entry.password = value
         entry.touch(modify=True)
-
-        if _encrypted_fingerprint(self._path) != baseline:
-            raise BackendError("KDBX home diverged before save; review the competing revision")
-
-        temporary = _temporary_path(self._path)
-        try:
-            try:
-                database.save(str(temporary))
-                os.chmod(temporary, 0o600)
-                _fsync_file(temporary)
-            except Exception as error:
-                raise BackendError("KDBX database could not be saved") from error
-
-            if _encrypted_fingerprint(self._path) != baseline:
-                raise BackendError("KDBX home diverged during save; review the competing revision")
-            try:
-                os.replace(temporary, self._path)
-                _fsync_directory(self._path.parent)
-            except OSError as error:
-                raise BackendError("KDBX database could not be replaced atomically") from error
-        finally:
-            try:
-                temporary.unlink(missing_ok=True)
-            except OSError:
-                pass
+        _save_database(database, self._path, baseline)
 
     def _open(self):
         if self._path.is_symlink():
@@ -188,6 +164,72 @@ class KDBXBackend:
         return matches[0]
 
 
+def create_kdbx_home(path: Path, password: str) -> None:
+    """Create a new encrypted KDBX home at an unused configured path."""
+    target = path.expanduser()
+    if not isinstance(password, str) or not password:
+        raise BackendError("KDBX master password was empty")
+    if target.exists() or target.is_symlink():
+        raise BackendError("KDBX home already exists at the configured path")
+    if not target.parent.is_dir():
+        raise BackendError("KDBX home parent directory is unavailable")
+
+    try:
+        from pykeepass import create_database
+    except ImportError as error:
+        raise BackendError("KDBX support requires the optional secretariat[kdbx] dependency") from error
+
+    temporary = _temporary_path(target)
+    try:
+        try:
+            temporary.unlink()
+            create_database(str(temporary), password=password)
+            os.chmod(temporary, 0o600)
+            _fsync_file(temporary)
+        except Exception as error:
+            raise BackendError("KDBX home could not be created") from error
+        if target.exists() or target.is_symlink():
+            raise BackendError("KDBX home appeared during creation; refusing to replace it")
+        try:
+            os.replace(temporary, target)
+            _fsync_directory(target.parent)
+        except OSError as error:
+            raise BackendError("KDBX home could not be installed atomically") from error
+    finally:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def add_kdbx_entry(
+    path: Path,
+    password_provider: Callable[[], str],
+    *,
+    title: str,
+    username: str,
+    url: str | None,
+    value: str,
+) -> str:
+    """Add one secret value to the existing home and return its stable UUID."""
+    if not value:
+        raise BackendError("credential value was empty")
+    backend = KDBXBackend(path, password_provider)
+    database, baseline = backend._open()
+    try:
+        entry = database.add_entry(
+            database.root_group,
+            title,
+            username,
+            value,
+            url=url or None,
+        )
+    except Exception as error:
+        raise BackendError("KDBX entry could not be created") from error
+    _save_database(database, backend._path, baseline)
+    return entry.uuid.hex.lower()
+
+
 def backend_for(
     source: Copy,
     tooling: Tooling,
@@ -227,6 +269,33 @@ def copy_paste_once(value: str, tooling: Tooling) -> None:
     )
     if result.returncode != 0:
         raise BackendError("credential could not be placed on the paste-once clipboard")
+
+
+def _save_database(database, path: Path, baseline: tuple[int, int, bytes]) -> None:
+    if _encrypted_fingerprint(path) != baseline:
+        raise BackendError("KDBX home diverged before save; review the competing revision")
+
+    temporary = _temporary_path(path)
+    try:
+        try:
+            database.save(str(temporary))
+            os.chmod(temporary, 0o600)
+            _fsync_file(temporary)
+        except Exception as error:
+            raise BackendError("KDBX database could not be saved") from error
+
+        if _encrypted_fingerprint(path) != baseline:
+            raise BackendError("KDBX home diverged during save; review the competing revision")
+        try:
+            os.replace(temporary, path)
+            _fsync_directory(path.parent)
+        except OSError as error:
+            raise BackendError("KDBX database could not be replaced atomically") from error
+    finally:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def _encrypted_fingerprint(path: Path) -> tuple[int, int, bytes]:
