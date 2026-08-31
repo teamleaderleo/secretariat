@@ -67,6 +67,39 @@ class GardenTests(unittest.TestCase):
         with self.assertRaisesRegex(GardenError, "duplicate copy id"):
             parse_garden(document)
 
+    def test_kdbx_copy_requires_canonical_uuid(self):
+        document = {
+            "schema_version": 3,
+            "entries": [
+                {
+                    "alias": "portable-example",
+                    "title": "Portable example",
+                    "kind": "password",
+                    "provider": "example",
+                    "copies": [
+                        {
+                            "id": "portable",
+                            "type": "kdbx",
+                            "reference": "00112233445566778899aabbccddeeff",
+                        }
+                    ],
+                }
+            ],
+        }
+        entry = parse_garden(document).by_alias("portable-example")
+        self.assertEqual(entry.home_copy().reference, "00112233445566778899aabbccddeeff")
+
+        invalid = (
+            "General/portable-example",
+            "{00112233-4455-6677-8899-aabbccddeeff}",
+            "00112233445566778899AABBCCDDEEFF",
+        )
+        for reference in invalid:
+            with self.subTest(reference=reference):
+                document["entries"][0]["copies"][0]["reference"] = reference
+                with self.assertRaisesRegex(GardenError, "canonical lowercase"):
+                    parse_garden(document)
+
     def test_unknown_and_value_bearing_fields_fail_closed(self):
         document = self.document()
         document["entries"][0]["convenient_extra"] = "nope"
