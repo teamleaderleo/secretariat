@@ -17,7 +17,7 @@ async function loadCandidates() {
       showMessage("No password credential is authorized for this page.");
       return;
     }
-    showMessage("Choose a credential to fill the password field.");
+    showMessage("Choose an available credential to fill the password field.");
     for (const credential of response.credentials) {
       credentials.appendChild(credentialButton(credential));
     }
@@ -32,26 +32,39 @@ function credentialButton(credential) {
   const title = document.createElement("strong");
   title.textContent = credential.title || credential.alias || "Credential";
   const detail = document.createElement("span");
-  detail.textContent = [credential.provider, credential.home_type].filter(Boolean).join(" · ");
-  button.append(title, detail);
-  button.addEventListener("click", async () => {
+  const parts = [credential.provider, credential.home_type].filter(Boolean);
+  if (credential.fillable !== true) {
+    parts.push(unavailableLabel(credential.unavailable_reason));
     button.disabled = true;
-    showMessage("Filling…");
-    try {
-      const response = await chrome.runtime.sendMessage({ action: "fill", alias: credential.alias });
-      if (!response || !response.ok) {
-        showMessage(response && response.error ? response.error : "Password field was not filled.");
+  }
+  detail.textContent = parts.join(" · ");
+  button.append(title, detail);
+  if (credential.fillable === true) {
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      showMessage("Filling…");
+      try {
+        const response = await chrome.runtime.sendMessage({ action: "fill", alias: credential.alias });
+        if (!response || !response.ok) {
+          showMessage(response && response.error ? response.error : "Password field was not filled.");
+          button.disabled = false;
+          return;
+        }
+        showMessage("Password filled.");
+        window.close();
+      } catch {
+        showMessage("Password field was not filled.");
         button.disabled = false;
-        return;
       }
-      showMessage("Password filled.");
-      window.close();
-    } catch {
-      showMessage("Password field was not filled.");
-      button.disabled = false;
-    }
-  });
+    });
+  }
   return button;
+}
+
+function unavailableLabel(reason) {
+  if (reason === "secret_service_helper_missing") return "Secret Service helper missing";
+  if (reason === "background_unlock_unavailable") return "background unlock unavailable";
+  return "unavailable";
 }
 
 function showMessage(value) {
