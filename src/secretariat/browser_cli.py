@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 from pathlib import Path
 
 from .browser_protocol import HOST_NAME
@@ -57,7 +58,7 @@ def main(arguments: list[str] | None = None) -> int:
         if args.json_output:
             print(json.dumps({"ok": False, "error": str(error)}, sort_keys=True))
         else:
-            print(f"secretariat: {error}")
+            print(f"secretariat: {error}", file=sys.stderr)
         return 2
 
 
