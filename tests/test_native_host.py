@@ -18,8 +18,14 @@ CALLER = "chrome-extension://abcdefghijklmnopabcdefghijklmnop/"
 
 
 class FakeBackend:
+    def __init__(self):
+        self.stored = []
+
     def load(self, _copy):
         return "generated-browser-password"
+
+    def store(self, source, value, label):
+        self.stored.append((source.reference, value, label))
 
 
 class NativeHostTests(unittest.TestCase):
@@ -87,6 +93,8 @@ class NativeHostTests(unittest.TestCase):
                 ("example-login-second", "generated-second-user@example.invalid"),
             ],
         )
+        self.assertTrue(all(item["fillable"] for item in response["credentials"]))
+        self.assertTrue(all(item["updatable"] for item in response["credentials"]))
 
     def test_get_checks_origin_and_only_returns_value_after_authorization(self):
         broker = BrowserBroker(self.garden(), Tooling("secret-tool", None, None))
@@ -100,10 +108,51 @@ class NativeHostTests(unittest.TestCase):
         with self.assertRaisesRegex(NativeHostError, "not authorized"):
             broker.handle(BrowserRequest("r2", "get", origin="https://evil.example", alias="example-login"))
 
-    def test_kdbx_browser_get_is_refused_until_noninteractive_unlock_exists(self):
+    def test_update_checks_origin_and_returns_no_value(self):
+        sentinel = "SECRETARIAT-GENERATED-ONLY-UPDATE-0002"
+        backend = FakeBackend()
+        broker = BrowserBroker(self.garden(), Tooling("secret-tool", None, None))
+        with patch("secretariat.native_host.backend_for", return_value=backend):
+            response = broker.handle(
+                BrowserRequest(
+                    "r1",
+                    "update",
+                    origin="https://example.com",
+                    alias="example-login",
+                    password=sentinel,
+                )
+            )
+        self.assertEqual(response["updated"], True)
+        self.assertNotIn(sentinel, json.dumps(response))
+        self.assertEqual(backend.stored, [("fixture", sentinel, "Example login")])
+
+        backend.stored.clear()
+        with self.assertRaisesRegex(NativeHostError, "not authorized"):
+            broker.handle(
+                BrowserRequest(
+                    "r2",
+                    "update",
+                    origin="https://evil.example",
+                    alias="example-login",
+                    password=sentinel,
+                )
+            )
+        self.assertEqual(backend.stored, [])
+
+    def test_kdbx_browser_get_and_update_are_refused_until_noninteractive_unlock_exists(self):
         broker = BrowserBroker(self.garden(home_type="kdbx"), Tooling(None, None, None, True))
         with self.assertRaisesRegex(NativeHostError, "cannot be opened"):
             broker.handle(BrowserRequest("r", "get", origin="https://example.com", alias="example-login"))
+        with self.assertRaisesRegex(NativeHostError, "cannot be opened"):
+            broker.handle(
+                BrowserRequest(
+                    "u",
+                    "update",
+                    origin="https://example.com",
+                    alias="example-login",
+                    password="generated-update",
+                )
+            )
 
     def test_frame_round_trip_and_bounds(self):
         stream = io.BytesIO()
@@ -148,6 +197,7 @@ class NativeHostTests(unittest.TestCase):
         response = read_message(output)
         self.assertTrue(response["ok"])
         self.assertEqual(response["request_id"], "r")
+        self.assertFalse(response["capabilities"]["update"])
         self.assertNotIn("generated-browser-password", json.dumps(response))
 
 
