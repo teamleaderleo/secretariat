@@ -114,6 +114,7 @@ function setActionsDisabled(actions, disabled) {
 
 function unavailableLabel(reason) {
   if (reason === "secret_service_helper_missing") return "Secret Service helper missing";
+  if (reason === "kdbx_locked") return "KDBX locked — start unlock agent";
   if (reason === "background_unlock_unavailable") return "background unlock unavailable";
   return "unavailable";
 }
