@@ -32,9 +32,7 @@ def parser() -> argparse.ArgumentParser:
 
 
 def main(arguments: list[str] | None = None) -> int:
-    values = list(arguments or [])
-    if values and values[0] == "browser":
-        values = values[1:]
+    values = _strip_browser_command(list(arguments or []))
     args = parser().parse_args(values)
     try:
         extension_origin = _extension_origin(args.extension_id)
@@ -61,6 +59,15 @@ def main(arguments: list[str] | None = None) -> int:
         else:
             print(f"secretariat: {error}")
         return 2
+
+
+def _strip_browser_command(values: list[str]) -> list[str]:
+    for index, value in enumerate(values):
+        if value == "browser":
+            return values[:index] + values[index + 1 :]
+        if value not in {"--json"}:
+            break
+    return values
 
 
 def _extension_origin(extension_id: str) -> str:
