@@ -45,13 +45,7 @@ def add_entry(
         "title": title,
         "kind": kind,
         "provider": provider,
-        "copies": [
-            {
-                "id": copy_id,
-                "type": copy_type,
-                "reference": reference,
-            }
-        ],
+        "copies": [{"id": copy_id, "type": copy_type, "reference": reference}],
         "home": copy_id,
     }
     if username is not None:
@@ -61,8 +55,6 @@ def add_entry(
 
 
 def add_entry_documents(path: Path, entries: tuple[dict[str, Any], ...]) -> tuple[str, ...]:
-    """Append a reviewed batch of complete Garden entry documents atomically."""
-
     if not entries:
         raise GardenEditError("reviewed plan contains no Garden entries")
     garden_file = _read(path)
@@ -79,7 +71,6 @@ def add_entry_documents(path: Path, entries: tuple[dict[str, Any], ...]) -> tupl
         if alias in incoming_aliases:
             raise GardenEditError("reviewed plan contains a duplicate credential alias")
         incoming_aliases.append(alias)
-
     garden_file.document["entries"].extend(entries)
     _write(garden_file)
     return tuple(incoming_aliases)
@@ -94,17 +85,60 @@ def attach_copy(
     reference: str,
     make_home: bool,
 ) -> None:
+    prepared = prepare_attach_copy(
+        path,
+        alias=alias,
+        copy_id=copy_id,
+        copy_type=copy_type,
+        reference=reference,
+        make_home=make_home,
+    )
+    commit_prepared(prepared)
+
+
+def prepare_attach_copy(
+    path: Path,
+    *,
+    alias: str,
+    copy_id: str,
+    copy_type: str,
+    reference: str,
+    make_home: bool,
+) -> GardenFile:
+    """Validate a copy attachment without writing it yet."""
+
     garden_file = _read(path)
     entry = _entry(garden_file.document, alias)
     copies = entry["copies"]
     if any(copy.get("id") == copy_id for copy in copies):
         raise GardenEditError("credential already contains that copy id")
-
     if len(copies) == 1 and "home" not in entry:
         entry["home"] = copies[0]["id"]
     copies.append({"id": copy_id, "type": copy_type, "reference": reference})
     if make_home:
         entry["home"] = copy_id
+    _validate_document(garden_file.document)
+    return garden_file
+
+
+def set_prepared_copy_reference(
+    garden_file: GardenFile,
+    *,
+    alias: str,
+    copy_id: str,
+    reference: str,
+) -> None:
+    entry = _entry(garden_file.document, alias)
+    matches = [copy for copy in entry["copies"] if copy.get("id") == copy_id]
+    if len(matches) != 1:
+        raise GardenEditError("prepared credential copy id was not found")
+    matches[0]["reference"] = reference
+    _validate_document(garden_file.document)
+
+
+def commit_prepared(garden_file: GardenFile) -> None:
+    """Commit a previously preflighted edit only if its Garden fingerprint still matches."""
+
     _write(garden_file)
 
 
@@ -152,14 +186,12 @@ def detach_copy(
         raise GardenEditError("credential copy id was not found")
     if len(copies) == 1:
         raise GardenEditError("cannot detach the only credential copy")
-
     current_home = entry.get("home") or copies[0]["id"]
     remaining_ids = {copy["id"] for copy in copies if copy.get("id") != copy_id}
     if new_home is not None and new_home not in remaining_ids:
         raise GardenEditError("new home must name a remaining credential copy")
     if current_home == copy_id and new_home is None:
         raise GardenEditError("detaching the home copy requires --new-home")
-
     entry["copies"] = [copy for copy in copies if copy.get("id") != copy_id]
     if new_home is not None:
         entry["home"] = new_home
@@ -200,17 +232,20 @@ def _read(path: Path) -> GardenFile:
     )
 
 
-def _write(garden_file: GardenFile) -> None:
+def _validate_document(document: dict[str, Any]) -> None:
     try:
-        parse_garden(garden_file.document)
+        parse_garden(document)
     except GardenError as error:
         raise GardenEditError(str(error)) from error
+
+
+def _write(garden_file: GardenFile) -> None:
+    _validate_document(garden_file.document)
     payload = (json.dumps(garden_file.document, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
     if len(payload) > MAX_GARDEN_BYTES:
         raise GardenEditError("edited Garden exceeds the reviewed byte limit")
     if _fingerprint(garden_file.path) != garden_file.fingerprint:
         raise GardenEditError("Garden diverged before save; review the competing revision")
-
     try:
         descriptor, raw_path = tempfile.mkstemp(
             prefix=f".{garden_file.path.name}.secretariat-",
@@ -225,7 +260,6 @@ def _write(garden_file: GardenFile) -> None:
             os.fsync(handle.fileno())
     except OSError as error:
         raise GardenEditError("Garden temporary file could not be written") from error
-
     try:
         if _fingerprint(garden_file.path) != garden_file.fingerprint:
             raise GardenEditError("Garden diverged during save; review the competing revision")
