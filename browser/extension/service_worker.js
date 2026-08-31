@@ -1,3 +1,5 @@
+import { nativeMessagingError } from "./native_error.mjs";
+import { sendNativeRequest } from "./native_request.mjs";
 import { fillLoginFields } from "./password_fill.mjs";
 
 const HOST_NAME = "com.secretariat.browser";
@@ -11,7 +13,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   handleMessage(message)
     .then(sendResponse)
-    .catch(() => sendResponse({ ok: false, error: "Secretariat browser request failed" }));
+    .catch((error) => sendResponse({ ok: false, error: nativeMessagingError(error) }));
   return true;
 });
 
@@ -76,7 +78,7 @@ async function handleMessage(message) {
     });
     const result = results && results[0] ? results[0].result : null;
     return result && result.ok
-      ? { ok: true }
+      ? { ok: true, username_filled: result.username_filled === true }
       : { ok: false, error: result && result.error ? result.error : "password field was not filled" };
   }
   if (message.action === "status") {
@@ -113,7 +115,7 @@ async function nativeRequest(action, payload) {
     action,
     ...payload
   };
-  return await chrome.runtime.sendNativeMessage(HOST_NAME, request);
+  return await sendNativeRequest(chrome.runtime, HOST_NAME, request);
 }
 
 function nativeError(response) {
