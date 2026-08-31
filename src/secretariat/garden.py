@@ -17,6 +17,7 @@ MAX_ENTRIES = 2_048
 MAX_TEXT = 512
 TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$")
 ENV_NAME = re.compile(r"^[A-Z_][A-Z0-9_]{0,127}$")
+KDBX_ENTRY_UUID = re.compile(r"^[0-9a-f]{32}$")
 
 ROOT_FIELDS = frozenset({"schema_version", "entries"})
 ENTRY_FIELDS = frozenset(
@@ -290,10 +291,14 @@ def _parse_entry(value: Any) -> Entry:
 def _parse_copy(value: Any) -> Copy:
     raw = _object(value, "copy")
     _fields(raw, COPY_FIELDS, COPY_REQUIRED, "copy")
+    source_type = _choice(raw["type"], SOURCE_TYPES, "copy source type")
+    reference = _text(raw["reference"], "copy reference")
+    if source_type == "kdbx" and not KDBX_ENTRY_UUID.fullmatch(reference):
+        raise GardenError("KDBX copy reference must be a canonical lowercase 32-hex entry UUID")
     return Copy(
         id=_token(raw["id"], "copy id"),
-        type=_choice(raw["type"], SOURCE_TYPES, "copy source type"),
-        reference=_text(raw["reference"], "copy reference"),
+        type=source_type,
+        reference=reference,
     )
 
 
