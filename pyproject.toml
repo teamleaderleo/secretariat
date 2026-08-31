@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=80"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "secretariat"
+version = "0.3.0"
+description = "Credential index, reconciliation tool, and password-store bridge"
+requires-python = ">=3.14"
+dependencies = []
+
+[project.scripts]
+secretariat = "secretariat.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
