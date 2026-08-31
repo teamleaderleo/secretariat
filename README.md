@@ -15,10 +15,13 @@ The public repository contains software, generated examples, tests, and document
 - a private standalone HTML reconciliation report;
 - GNOME Secret Service value access for explicitly configured home copies;
 - optional exact-UUID KDBX home read/write through PyKeePass, with entry history and encrypted-file divergence checks;
+- explicit KDBX home creation and UUID-backed entry enrollment;
+- atomic secret-free Garden metadata editing;
+- a generated-data Chrome/Edge Manifest V3 + native-messaging bridge for exact-origin password fill;
 - repository scanning for several common secret formats;
 - indexed copy types for Apple Passwords, Chrome, Edge, macOS Keychain, SSH agent, KDBX, and external providers.
 
-Apple and browser credential-provider integrations remain under development.
+Apple credential-provider integration, browser account/save flows, KDBX browser unlock, and real device proofs remain under development.
 
 ## Run from a checkout
 
@@ -100,6 +103,10 @@ Then configure the encrypted database path per device. The master password stays
 
 Native password managers remain useful interfaces and replicas around the same logical credential.
 
+### Chrome and Edge
+
+The first browser bridge lives under `browser/extension` and communicates with `secretariat-native-host`. It authorizes fills against an explicit Garden login URL and re-checks the active tab origin before injection. See [`docs/browser-bridge.md`](docs/browser-bridge.md) for generated-data setup and current limitations.
+
 ## Repository split
 
 A practical deployment uses three separate locations:
@@ -119,3 +126,9 @@ Device-specific unlock material, browser host registration, cloud credentials, a
 - Reconciliation is read-only; propagation and deletion require separate explicit workflows.
 
 See `SECURITY.md` and the docs directory for the detailed boundaries.
+
+## License
+
+Secretariat is licensed under the Apache License 2.0. See `LICENSE` and `NOTICE`.
+
+The optional `kdbx` extra uses PyKeePass, which is separately licensed under GPL-3.0. PyKeePass retains its own license terms; redistributors should review the obligations that apply to the form in which they distribute or bundle optional dependencies.
