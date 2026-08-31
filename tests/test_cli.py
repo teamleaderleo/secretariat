@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from secretariat import cli
+from secretariat.garden import load_garden
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -121,6 +122,79 @@ class CliTests(unittest.TestCase):
             rendered = output.getvalue() + errors.getvalue()
             self.assertNotIn(value, rendered)
             self.assertNotIn(master, rendered)
+
+    def test_home_verify_loads_exact_enrolled_copy_without_printing_value(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "portable.kdbx"
+            path.touch()
+            garden = root / "garden.json"
+            garden.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 3,
+                        "entries": [
+                            {
+                                "alias": "generated-login",
+                                "title": "Generated login",
+                                "kind": "password",
+                                "provider": "example",
+                                "copies": [
+                                    {
+                                        "id": "portable",
+                                        "type": "kdbx",
+                                        "reference": "00112233445566778899aabbccddeeff",
+                                    }
+                                ],
+                                "home": "portable",
+                            }
+                        ],
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            config = type("Config", (), {"kdbx_path": path})()
+            backend = FakeBackend()
+            output = io.StringIO()
+            errors = io.StringIO()
+            with (
+                patch("secretariat.cli.Tooling.detect", return_value=self.tooling(pykeepass=True)),
+                patch("secretariat.cli.load_device_config", return_value=config),
+                patch("secretariat.cli.default_config_path", return_value=root / "config.json"),
+                patch("secretariat.cli.backend_for", return_value=backend) as backend_factory,
+                redirect_stdout(output),
+                redirect_stderr(errors),
+            ):
+                code = cli.main(["--garden", str(garden), "home", "verify", "generated-login"])
+            self.assertEqual(code, 0)
+            enrolled = load_garden(garden).by_alias("generated-login")
+            backend_factory.assert_called_once_with(
+                enrolled.home_copy(),
+                self.tooling(pykeepass=True),
+                device_config=config,
+            )
+            self.assertIn("verified generated-login", output.getvalue())
+            self.assertNotIn(FakeBackend.SENTINEL, output.getvalue() + errors.getvalue())
+
+    def test_home_verify_refuses_non_kdbx_home(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "portable.kdbx"
+            path.touch()
+            config = type("Config", (), {"kdbx_path": path})()
+            errors = io.StringIO()
+            with (
+                patch("secretariat.cli.Tooling.detect", return_value=self.tooling(pykeepass=True)),
+                patch("secretariat.cli.load_device_config", return_value=config),
+                patch("secretariat.cli.default_config_path", return_value=root / "config.json"),
+                redirect_stderr(errors),
+            ):
+                code = cli.main(
+                    ["--garden", str(EXAMPLE), "home", "verify", "example-browser-login"]
+                )
+            self.assertEqual(code, 2)
+            self.assertIn("does not use a KDBX home copy", errors.getvalue())
 
     def test_indexed_only_home_refuses_value_access(self):
         errors = io.StringIO()
