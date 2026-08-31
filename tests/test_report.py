@@ -12,10 +12,11 @@ class ReportTests(unittest.TestCase):
     def report(self):
         return Report(
             snapshot_count=3,
-            observation_count=3,
+            observation_count=4,
             groups=(
                 Group(
                     origin="https://example.com",
+                    title="Example",
                     username='<script>alert("fixture")</script>',
                     classification="conflict",
                     copies=2,
@@ -26,6 +27,7 @@ class ReportTests(unittest.TestCase):
                 ),
                 Group(
                     origin="https://other.example",
+                    title="Other",
                     username="user@example.com",
                     classification="single",
                     copies=1,
@@ -33,6 +35,18 @@ class ReportTests(unittest.TestCase):
                     source_counts=(("edge_passwords", 1),),
                     note_sources=(),
                     otp_sources=(),
+                ),
+                Group(
+                    origin="https://blocked.example",
+                    title="Blocked",
+                    username="blocked@example.com",
+                    classification="conflict",
+                    copies=2,
+                    sources=("chrome_passwords",),
+                    source_counts=(("chrome_passwords", 2),),
+                    note_sources=(),
+                    otp_sources=(),
+                    ambiguous_sources=("chrome_passwords",),
                 ),
             ),
             multi_account_origins=("https://example.com",),
@@ -42,9 +56,22 @@ class ReportTests(unittest.TestCase):
         rendered = reconciliation_html(self.report())
         self.assertIn("Secretariat reconciliation", rendered)
         self.assertIn('data-filter="conflict"', rendered)
+        self.assertIn("Download reviewed Garden plan", rendered)
+        self.assertIn("secretariat-garden-plan.json", rendered)
         self.assertIn("OTP in apple_passwords", rendered)
+        self.assertIn("same-store conflict: chrome_passwords", rendered)
+        self.assertIn('class="enroll" type="checkbox"', rendered)
+        self.assertIn('class="home"', rendered)
         self.assertNotIn('<script>alert("fixture")</script>', rendered)
         self.assertIn("&lt;script&gt;", rendered)
+        self.assertNotIn("generated-password", rendered)
+
+    def test_blocked_same_source_conflict_cannot_be_selected(self):
+        rendered = reconciliation_html(self.report())
+        marker = 'aria-label="Enroll Blocked"'
+        offset = rendered.index(marker)
+        snippet = rendered[offset:offset + 180]
+        self.assertIn("disabled", snippet)
 
     def test_writer_creates_private_file_and_refuses_overwrite(self):
         with tempfile.TemporaryDirectory() as directory:
