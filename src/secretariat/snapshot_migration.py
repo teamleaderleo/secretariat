@@ -27,6 +27,37 @@ class SnapshotMigrationError(BackendError):
     """Bounded migration failure that never includes a credential value."""
 
 
+class SnapshotMigrationOrphanError(SnapshotMigrationError):
+    """A KDBX entry exists but the preflighted Garden promotion did not commit."""
+
+    def __init__(self, *, alias: str, garden_path: Path, kdbx_uuid: str) -> None:
+        super().__init__(
+            f"KDBX entry {kdbx_uuid} was created but the Garden was not changed; attach the UUID deliberately"
+        )
+        self.alias = alias
+        self.garden_path = garden_path
+        self.kdbx_uuid = kdbx_uuid
+
+    @property
+    def recovery_argv(self) -> tuple[str, ...]:
+        return (
+            "secretariat",
+            "--garden",
+            str(self.garden_path),
+            "garden",
+            "attach",
+            "--alias",
+            self.alias,
+            "--copy-id",
+            PORTABLE_COPY_ID,
+            "--copy-type",
+            "kdbx",
+            "--reference",
+            self.kdbx_uuid,
+            "--home",
+        )
+
+
 @dataclass(frozen=True)
 class MigrationSelection:
     alias: str
@@ -126,11 +157,9 @@ def migrate_snapshot_home_to_kdbx(
         )
         commit_prepared(prepared)
     except GardenEditError as error:
-        recovery = (
-            f"KDBX entry {reference} was created but the Garden was not changed. "
-            f"Recover with: secretariat --garden {garden_path} garden attach "
-            f"--alias {selection.alias} --copy-id {PORTABLE_COPY_ID} --copy-type kdbx "
-            f"--reference {reference} --home"
-        )
-        raise SnapshotMigrationError(recovery) from error
+        raise SnapshotMigrationOrphanError(
+            alias=selection.alias,
+            garden_path=garden_path,
+            kdbx_uuid=reference,
+        ) from error
     return MigrationResult(selection.alias, reference)
