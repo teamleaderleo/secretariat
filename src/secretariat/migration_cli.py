@@ -6,13 +6,18 @@ import argparse
 import getpass
 import json
 import os
+import shlex
 import sys
 from pathlib import Path
 
 from .backends import BackendError, Tooling
 from .config import DeviceConfigError, default_config_path, load_device_config
 from .reconcile import ReconcileError, parse_snapshot_spec
-from .snapshot_migration import SnapshotMigrationError, migrate_snapshot_home_to_kdbx
+from .snapshot_migration import (
+    SnapshotMigrationError,
+    SnapshotMigrationOrphanError,
+    migrate_snapshot_home_to_kdbx,
+)
 
 
 def _default_garden_path() -> Path:
@@ -75,6 +80,23 @@ def main(arguments: list[str] | None = None) -> int:
         else:
             print(f"migrated {result.alias} to KDBX home copy portable ({result.kdbx_uuid})")
         return 0
+    except SnapshotMigrationOrphanError as error:
+        if args.json_output:
+            print(
+                json.dumps(
+                    {
+                        "ok": False,
+                        "error": str(error),
+                        "kdbx_uuid": error.kdbx_uuid,
+                        "recovery_argv": list(error.recovery_argv),
+                    },
+                    sort_keys=True,
+                )
+            )
+        else:
+            print(f"secretariat: {error}", file=sys.stderr)
+            print(f"recovery: {shlex.join(error.recovery_argv)}", file=sys.stderr)
+        return 2
     except (SnapshotMigrationError, BackendError, DeviceConfigError, ReconcileError) as error:
         if args.json_output:
             print(json.dumps({"ok": False, "error": str(error)}, sort_keys=True))
