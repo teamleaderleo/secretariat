@@ -17,48 +17,99 @@ async function loadCandidates() {
       showMessage("No password credential is authorized for this page.");
       return;
     }
-    showMessage("Choose an available credential to fill the password field.");
+    showMessage("Choose a credential action.");
     for (const credential of response.credentials) {
-      credentials.appendChild(credentialButton(credential));
+      credentials.appendChild(credentialCard(credential));
     }
   } catch {
     showMessage("Secretariat is unavailable.");
   }
 }
 
-function credentialButton(credential) {
-  const button = document.createElement("button");
-  button.type = "button";
+function credentialCard(credential) {
+  const card = document.createElement("section");
+  card.className = "credential";
+
   const title = document.createElement("strong");
   title.textContent = credential.title || credential.alias || "Credential";
   const detail = document.createElement("span");
   const parts = [credential.username, credential.provider, credential.home_type].filter(Boolean);
-  if (credential.fillable !== true) {
+  if (credential.fillable !== true && credential.updatable !== true) {
     parts.push(unavailableLabel(credential.unavailable_reason));
-    button.disabled = true;
   }
   detail.textContent = parts.join(" · ");
-  button.append(title, detail);
+
+  const actions = document.createElement("div");
+  actions.className = "actions";
+
+  const fill = actionButton("Fill", credential.fillable === true);
   if (credential.fillable === true) {
-    button.addEventListener("click", async () => {
-      button.disabled = true;
-      showMessage("Filling…");
-      try {
-        const response = await chrome.runtime.sendMessage({ action: "fill", alias: credential.alias });
-        if (!response || !response.ok) {
-          showMessage(response && response.error ? response.error : "Password field was not filled.");
-          button.disabled = false;
-          return;
-        }
-        showMessage(response.username_filled ? "Username and password filled." : "Password filled.");
-        window.close();
-      } catch {
-        showMessage("Password field was not filled.");
-        button.disabled = false;
-      }
-    });
+    fill.addEventListener("click", () => fillCredential(credential, actions));
   }
+  actions.appendChild(fill);
+
+  const update = actionButton("Update saved password", credential.updatable === true);
+  if (credential.updatable === true) {
+    update.addEventListener("click", () => updateCredential(credential, actions));
+  }
+  actions.appendChild(update);
+
+  card.append(title, detail, actions);
+  return card;
+}
+
+function actionButton(label, enabled) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = label;
+  button.disabled = !enabled;
   return button;
+}
+
+async function fillCredential(credential, actions) {
+  setActionsDisabled(actions, true);
+  showMessage("Filling…");
+  try {
+    const response = await chrome.runtime.sendMessage({ action: "fill", alias: credential.alias });
+    if (!response || !response.ok) {
+      showMessage(response && response.error ? response.error : "Password field was not filled.");
+      setActionsDisabled(actions, false);
+      return;
+    }
+    showMessage(response.username_filled ? "Username and password filled." : "Password filled.");
+    window.close();
+  } catch {
+    showMessage("Password field was not filled.");
+    setActionsDisabled(actions, false);
+  }
+}
+
+async function updateCredential(credential, actions) {
+  const label = credential.title || credential.alias || "this credential";
+  if (!window.confirm(`Replace Secretariat's saved password for ${label} with the selected page field?`)) {
+    return;
+  }
+  setActionsDisabled(actions, true);
+  showMessage("Updating saved password…");
+  try {
+    const response = await chrome.runtime.sendMessage({ action: "update", alias: credential.alias });
+    if (!response || !response.ok) {
+      showMessage(response && response.error ? response.error : "Saved password was not updated.");
+      setActionsDisabled(actions, false);
+      return;
+    }
+    showMessage("Saved password updated.");
+    window.close();
+  } catch {
+    showMessage("Saved password was not updated.");
+    setActionsDisabled(actions, false);
+  }
+}
+
+function setActionsDisabled(actions, disabled) {
+  for (const button of actions.querySelectorAll("button")) {
+    button.disabled = disabled;
+  }
 }
 
 function unavailableLabel(reason) {
