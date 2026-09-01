@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "secretariat"
-version = "0.11.0"
+version = "0.12.0"
 description = "Credential index, reconciliation tool, and password-store bridge"
 requires-python = ">=3.14"
 license = "Apache-2.0"
@@ -16,7 +16,7 @@ kdbx = ["pykeepass>=4.2.0"]
 [project.scripts]
 secretariat = "secretariat.app:main"
 secretariat-native-host = "secretariat.native_host:main"
-secretariat-kdbx-agent = "secretariat.kdbx_agent:main"
+secretariat-kdbx-agent = "secretariat.kdbx_agent_cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
