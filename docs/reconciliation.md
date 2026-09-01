@@ -85,8 +85,39 @@ The first implementation only **adds new logical credentials**. It does not merg
 
 Successful application uses the same mode-0600 same-directory temporary write and atomic replacement as other Garden edits. A failure anywhere leaves the Garden unchanged.
 
+## Promote a reviewed snapshot home into KDBX
+
+After plan application, a credential may deliberately still have `chrome_passwords`, `edge_passwords`, or `apple_passwords` as its home. Those copies are useful reconciliation identities but do not provide Secretariat value access.
+
+To move one reviewed account into the portable encrypted KDBX home, keep the deliberate temporary export for that chosen source long enough to run:
+
+```text
+secretariat \
+  --garden /private/path/secretariat-garden/garden.json \
+  migrate to-kdbx example.com-generated-user-example.invalid \
+  --snapshot apple_passwords=/private/path/apple.csv
+```
+
+The command requires the supplied snapshot source to match the Garden credential's **current home**. It identifies the snapshot row only by the Garden `links.login` origin plus Garden username. Titles are never used to guess identity.
+
+If several rows in that source match the same account, they are accepted only when their passwords compare equal in memory. Conflicting rows stop the migration.
+
+The migration then:
+
+1. preflights attaching a canonical `portable` KDBX copy and making it home without changing the Garden yet;
+2. prompts for the configured KDBX master password through the existing KDBX adapter;
+3. writes the selected snapshot password into a new encrypted KDBX entry and receives its exact UUID;
+4. substitutes that UUID into the preflighted Garden edit; and
+5. commits the Garden only if its original file fingerprint still matches.
+
+The password is never put in the reviewed plan, Garden, stdout, logs, or a metadata hash.
+
+KDBX and Garden are two independent durable stores, so no implementation can make that final two-file operation perfectly atomic. If another editor/Git process changes the Garden after the KDBX entry is created but before the Garden commit, Secretariat **does not delete the new encrypted entry automatically**. It reports the UUID and a metadata-only `garden attach ... --home` recovery command. That leaves a harmless orphaned encrypted KDBX entry rather than risking deletion from the wrong database revision.
+
+The original Chrome/Edge/Apple copy remains recorded as a replica. Promotion does not delete or overwrite any external password-manager record.
+
 ## Cleanup boundary
 
-Applying a plan records the observed Chrome/Edge/Apple copies and the chosen home relationship. It does not delete or overwrite anything in those external password stores. Source-side cleanup and replica retirement remain separate reviewed operations.
+Applying a plan records the observed Chrome/Edge/Apple copies and the chosen home relationship. Promoting an entry into KDBX creates the portable home but still does not delete external replicas. Source-side cleanup and replica retirement remain separate reviewed operations.
 
-Delete plaintext CSV exports when the review is finished. The HTML report and reviewed plan contain no credential values, but they do contain private sites/usernames/source metadata, so keep or remove them according to your own retention needs.
+Delete plaintext CSV exports after the review/migration work that needs them is finished. The HTML report and reviewed plan contain no credential values, but they do contain private sites/usernames/source metadata, so keep or remove them according to your own retention needs.
