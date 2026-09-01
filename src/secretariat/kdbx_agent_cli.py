@@ -75,7 +75,16 @@ def main(arguments: list[str] | None = None) -> int:
             print("KDBX unlock agent is ready; keep this process running to allow enrolled KDBX access")
             return server.serve()
         raise KDBXAgentError("unsupported_action", "unlock-agent command is unsupported")
-    except (KDBXAgentError, BackendError, DeviceConfigError) as error:
+    except KDBXAgentError as error:
+        if args.command == "status" and error.code == "backend_failure":
+            print(
+                "secretariat-kdbx-agent: KDBX home changed since unlock; session was invalidated",
+                file=sys.stderr,
+            )
+        else:
+            print(f"secretariat-kdbx-agent: {error}", file=sys.stderr)
+        return 2
+    except (BackendError, DeviceConfigError) as error:
         print(f"secretariat-kdbx-agent: {error}", file=sys.stderr)
         return 2
 
