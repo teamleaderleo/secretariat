@@ -54,6 +54,14 @@ def inspect_portable_home(
             kdbx_file="missing",
             agent="not_checked",
         )
+    if config.kdbx_path.is_symlink():
+        return PortableHomeStatus(
+            state="path_unsafe",
+            kdbx_library="available",
+            kdbx_path="unsafe_symlink",
+            kdbx_file="unsafe",
+            agent="not_checked",
+        )
     if not config.kdbx_path.is_file():
         return PortableHomeStatus(
             state="file_missing",
@@ -104,4 +112,8 @@ def inspect_portable_home(
 
 
 def _file_state(path: Path | None) -> str:
-    return "available" if path is not None and path.is_file() else "missing"
+    if path is None:
+        return "missing"
+    if path.is_symlink():
+        return "unsafe"
+    return "available" if path.is_file() else "missing"
