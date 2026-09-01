@@ -8,7 +8,7 @@ Secretariat can use a KDBX entry as the authoritative value for an enrolled cred
 python -m pip install -e '.[kdbx]'
 ```
 
-The `kdbx` extra currently uses PyKeePass 4.2 or newer for KDBX3/KDBX4 read and write access. PyKeePass is GPL-3.0 licensed; account for that dependency when choosing Secretariat's eventual public license and distribution model.
+The `kdbx` extra currently uses PyKeePass 4.2 or newer for KDBX3/KDBX4 read and write access. PyKeePass is GPL-3.0 licensed and remains an optional integration.
 
 ## Device configuration
 
@@ -36,11 +36,28 @@ Example:
 
 `SECRETARIAT_CONFIG` can point at a different config file. `SECRETARIAT_KDBX_PATH` can override the KDBX path for a process. The database master password is absent from both configuration mechanisms; interactive CLI operations prompt for it when the KDBX home is opened.
 
-Check setup without opening the database:
+## Inspect home state
 
 ```text
 secretariat home status
 ```
+
+The status command never opens an encrypted entry or returns a credential value. It combines dependency/path/file readiness with the short-lived KDBX unlock-agent state.
+
+Common `state` values:
+
+- `dependency_missing` — install the optional KDBX extra;
+- `config_missing` — no KDBX path is configured on this device;
+- `file_missing` — the configured encrypted file is not currently present;
+- `path_unsafe` — the configured database path is a symlink, which the KDBX backend refuses;
+- `available_locked` — the encrypted file is available for interactive CLI unlock, but no usable browser unlock-agent session is running;
+- `available_unlocked` — the agent is running and its health check confirms the encrypted file still matches the revision opened at unlock;
+- `changed_since_unlock` — the status probe discovered that the encrypted KDBX file changed after the agent opened it, so the old session is being invalidated;
+- `agent_unsafe` or `agent_unavailable` — the configured file exists, but the agent endpoint cannot be trusted/reached.
+
+When unlocked, status also reports the remaining idle and absolute session lifetime. `--json` returns the same metadata in machine-readable form.
+
+The installed `secretariat-kdbx-agent status` command performs the same revision-aware health probe. A Drive/KeePassXC replacement discovered by that probe invalidates the running session rather than continuing to advertise it as unlocked.
 
 ## Create the encrypted home
 
@@ -85,6 +102,8 @@ A KDBX copy uses the entry UUID as exactly 32 lowercase hexadecimal characters:
 
 Titles and group paths are mutable and may be ambiguous, so Secretariat rejects them as KDBX identity. The current KeePassXC command-line client still lacks an exact UUID selection command; the adapter therefore uses PyKeePass's UUID lookup instead of title/path matching.
 
+Reviewed Chrome/Edge/Apple reconciliation entries can also be promoted one account at a time with `secretariat migrate to-kdbx ...`; see `docs/reconciliation.md`.
+
 ## Reads
 
 `copy` and `run` can read a KDBX home once the optional dependency and device path are available. Secretariat resolves exactly one entry by UUID and reads its protected Password field.
@@ -95,15 +114,21 @@ On macOS, prove an enrolled entry can be unlocked and resolved without placing i
 secretariat --garden /path/to/generated-garden.json home verify example-login
 ```
 
-`home verify` prompts for the KDBX master password, resolves the Garden's exact home-copy UUID, requires a non-empty protected Password field, and discards the value. Its output contains only the alias and home-copy ID. This is the preferred generated-data smoke test on a Mac, where Secretariat's paste-once Wayland clipboard helper is unavailable.
+`home verify` prompts for the KDBX master password, resolves the Garden's exact home-copy UUID, requires a non-empty protected Password field, and discards the value. Its output contains only the alias and home-copy ID.
 
 Passkeys are excluded from this generic value path. They remain in platform credential-provider/exchange APIs.
+
+## Browser unlock agent
+
+On macOS/Linux, `secretariat-kdbx-agent serve` keeps one explicitly unlocked KDBX object in a foreground process and exposes only exact-UUID get/put operations over a user-only Unix socket. Browser native-host processes never receive the KDBX master password. See `docs/kdbx-agent.md` for the threat model, expiry behavior, and IPC boundary.
 
 ## Writes and conflicts
 
 Before changing an entry, Secretariat records a fingerprint of the encrypted KDBX file, saves the previous entry version into KDBX history, updates the password field, and writes a new encrypted database to a mode-0600 temporary file in the same directory.
 
 Immediately before replacing the home file, Secretariat verifies that the original encrypted file is unchanged. If another process or cloud transport changed it, the write stops with a divergence error. The temporary file is discarded and the competing revision stays intact for review.
+
+The unlock agent is revision-bound too. Its value reads/writes and revision-aware status probe stop using the session after the encrypted file changes underneath it.
 
 A successful write uses an atomic same-directory replacement where the platform supports it. Cloud version history remains valuable recovery evidence.
 
@@ -123,4 +148,4 @@ In Finder list view, wait for Google Drive for desktop's upload progress indicat
 
 ## Current scope
 
-The setup commands create the home and raw UUID-backed entries. They do not import live browser/password-manager data and they do not mutate the private Garden. Key-file/hardware-key unlock, automated native-keyring unlock, Garden enrollment, and cross-revision merge UI are follow-up work. Generated databases should be used while exercising new flows.
+Secretariat now has explicit home creation, exact-UUID entry creation/read/write, reviewed Garden enrollment, snapshot-to-KDBX promotion, value-silent verification, and a foreground macOS/Linux browser unlock agent. Remaining work includes cross-device Linux proof, OS service/startup packaging for the agent, Windows agent IPC, optional OS credential assistance for unlock, and richer conflict/recovery UI.
