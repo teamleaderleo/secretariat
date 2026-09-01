@@ -1,4 +1,4 @@
-"""Explicit one-credential migration from a reviewed snapshot home into KDBX."""
+"""Explicit value selection and migration from reviewed password-manager snapshots."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ PLACEHOLDER_KDBX_UUID = "0" * 32
 
 
 class SnapshotMigrationError(BackendError):
-    """Bounded migration failure that never includes a credential value."""
+    """Bounded snapshot-value/migration failure that never includes a credential value."""
 
 
 class SnapshotMigrationOrphanError(SnapshotMigrationError):
@@ -59,6 +59,15 @@ class SnapshotMigrationOrphanError(SnapshotMigrationError):
 
 
 @dataclass(frozen=True)
+class SnapshotAccountSelection:
+    source: str
+    matching_rows: int
+    notes_present: bool
+    otp_present: bool
+    value: str = field(repr=False)
+
+
+@dataclass(frozen=True)
 class MigrationSelection:
     alias: str
     title: str
@@ -72,6 +81,35 @@ class MigrationSelection:
 class MigrationResult:
     alias: str
     kdbx_uuid: str
+
+
+def select_snapshot_account_value(
+    login: str,
+    username: str,
+    snapshot: SnapshotSpec,
+) -> SnapshotAccountSelection:
+    target_origin = normalize_origin(login)
+    username_key = username.strip().casefold()
+    observations = read_snapshot(snapshot)
+    matches = tuple(
+        observation
+        for observation in observations
+        if observation.origin == target_origin and observation.username_key == username_key
+    )
+    if not matches:
+        raise SnapshotMigrationError("snapshot contains no row matching the Garden login origin and username")
+    first = matches[0].password
+    if any(not hmac.compare_digest(first, observation.password) for observation in matches[1:]):
+        raise SnapshotMigrationError("snapshot source contains conflicting passwords for this Garden account")
+    if not first:
+        raise SnapshotMigrationError("snapshot matching row has an empty password")
+    return SnapshotAccountSelection(
+        source=snapshot.source,
+        matching_rows=len(matches),
+        notes_present=any(bool(observation.notes) for observation in matches),
+        otp_present=any(bool(observation.otp_auth) for observation in matches),
+        value=first,
+    )
 
 
 def select_snapshot_value(garden_path: Path, alias: str, snapshot: SnapshotSpec) -> MigrationSelection:
@@ -90,30 +128,15 @@ def select_snapshot_value(garden_path: Path, alias: str, snapshot: SnapshotSpec)
     login = entry.links.get("login")
     if not login:
         raise SnapshotMigrationError("credential requires an explicit Garden login URL before migration")
-    target_origin = normalize_origin(login)
     username = entry.username or ""
-    username_key = username.strip().casefold()
-
-    observations = read_snapshot(snapshot)
-    matches = tuple(
-        observation
-        for observation in observations
-        if observation.origin == target_origin and observation.username_key == username_key
-    )
-    if not matches:
-        raise SnapshotMigrationError("snapshot contains no row matching the Garden login origin and username")
-    first = matches[0].password
-    if any(not hmac.compare_digest(first, observation.password) for observation in matches[1:]):
-        raise SnapshotMigrationError("snapshot source contains conflicting passwords for this Garden account")
-    if not first:
-        raise SnapshotMigrationError("snapshot matching row has an empty password")
+    selection = select_snapshot_account_value(login, username, snapshot)
     return MigrationSelection(
         alias=entry.alias,
         title=entry.title,
         username=username,
         login=login,
-        source=home.type,
-        value=first,
+        source=selection.source,
+        value=selection.value,
     )
 
 
