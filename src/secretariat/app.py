@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 
-from . import browser_cli, cli, garden_cli, home_cli, migration_cli
+from . import browser_cli, cli, garden_cli, home_cli, migration_cli, replica_cli
 
 
 def main(arguments: list[str] | None = None) -> int:
@@ -16,6 +16,8 @@ def main(arguments: list[str] | None = None) -> int:
         return browser_cli.main(values)
     if command == "migrate":
         return migration_cli.main(values)
+    if command == "replica":
+        return replica_cli.main(values)
     if command == "home":
         return home_cli.main(values)
     return cli.main(values)
